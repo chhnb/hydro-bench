@@ -41,6 +41,8 @@ results/*.jsonl
 results/*.txt
 results/alignment/*.json
 results/alignment/SUMMARY.md
+results/alignment/native_outputs/
+results/alignment/taichi_outputs/
 !results/.gitkeep
 
 # Editor / OS
