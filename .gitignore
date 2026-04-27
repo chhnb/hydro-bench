@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Virtualenvs
+venv/
+spmd-venv/
+.venv/
+
+# Build artifacts (compiled by setup.sh)
+cuda_native_impl/F1_hydro_native_*
+cuda_native_impl/F2_hydro_native_*
+cuda_native_impl/hydro_native_benchmark
+cuda_native_impl/*.original
+cuda_native_impl/*.bak
+cuda_native_impl/*_nofma
+cuda_impl/F1_persistent_bench
+cuda_impl/F2_persistent_bench
+cuda_impl/hydro_persistent_bench
+*.o
+*.so
+*.cubin
+
+# Generated PTX / IR dumps (debug)
+cuda_impl/*.ptx
+data/**/*.ptx
+data/**/*.json
+/tmp/taichi_*
+
+# Large mesh / dump data — fetch via separate data archive (see docs/DATA.md)
+data/
+cuda_native_impl/*_native_data/
+**/native_dump*.bin
+*.bin
+
+# Test outputs
+results/*.jsonl
+results/*.txt
+!results/.gitkeep
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+/venv
