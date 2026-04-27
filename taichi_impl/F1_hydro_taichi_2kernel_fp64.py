@@ -33,7 +33,7 @@ def run_real(steps=1, backend="cuda", mesh="default", fixed_dt=None):
     NE = 4 * CELL
     HM1 = float(m["HM1"])
     HM2 = float(m["HM2"])
-    DT = float(fixed_dt) if fixed_dt else 1.0
+    DT = float(fixed_dt) if fixed_dt else float(m.get("DT", 1.0))
 
     # --- Convert F1's 2D 1-indexed mesh to F2's flat NE arrays (0-indexed) ---
     # F1 layout: NAC[j, pos] for j in 1..4, pos in 1..CELL
@@ -89,6 +89,16 @@ def run_real(steps=1, backend="cuda", mesh="default", fixed_dt=None):
     ZB1 = ti.field(ti.f64, shape=CELL)
     AREA = ti.field(ti.f64, shape=CELL)
     FNC = ti.field(ti.f64, shape=CELL)
+
+    NDAYS = int(m.get("NDAYS", 50))
+    ZT_field  = ti.field(ti.f64, shape=NDAYS * CELL)
+    DZT_field = ti.field(ti.f64, shape=NDAYS * CELL)
+    QT_field  = ti.field(ti.f64, shape=NDAYS * CELL)
+    DQT_field = ti.field(ti.f64, shape=NDAYS * CELL)
+    ZT_field.from_numpy(m["ZT"].astype(np.float64))
+    DZT_field.from_numpy(m["DZT"].astype(np.float64))
+    QT_field.from_numpy(m["QT"].astype(np.float64))
+    DQT_field.from_numpy(m["DQT"].astype(np.float64))
 
     NAC.from_numpy(NAC_flat)
     KLAS.from_numpy(KLAS_flat)
@@ -254,21 +264,60 @@ def run_real(steps=1, backend="cuda", mesh="default", fixed_dt=None):
                 else:
                     # Boundary dispatch (matches native CUDA BOUNDA function)
                     if KP == 10:
-                        # CalculateKlas10 with QT=0: HB = FIL²/39.24 (iteration converges to this).
-                        # We compute directly to avoid FP non-determinism in the iteration's break condition.
-                        HB = FIL_v * FIL_v / 39.24
-                        f0 = 0.0
-                        f1 = 0.0
+                        # CalculateKlas10: native uses iterative HB convergence with QT/DQT.
+                        # FLUX0 = -(QT[jt*CELL+pos] + DQT*kt) / SIDE
+                        SIDE_e = SIDE[idx]
+                        zt_idx = jt * CELL + cell_i
+                        flux0_kl10 = -(QT_field[zt_idx] + DQT_field[zt_idx] * ti.cast(kt, ti.f64)) / SIDE_e
+                        QB2 = flux0_kl10 * flux0_kl10
+                        HB0 = H1
+                        HB = ti.cast(0.0, ti.f64)
+                        converged_k10 = False
+                        for _ in range(20):
+                            if not converged_k10:
+                                W_temp = FIL_v - flux0_kl10 / HB0
+                                HB = W_temp * W_temp / 39.24
+                                if ti.abs(HB0 - HB) <= 0.005:
+                                    converged_k10 = True
+                                else:
+                                    HB0 = HB0 * 0.5 + HB * 0.5
+                        f0 = flux0_kl10
+                        f1 = ti.select(HB <= 1.0, ti.cast(0.0, ti.f64), QB2 / HB)
                         f2 = 0.0
                         f3 = ti.cast(HALF_G * HB, ti.f64) * HB
                     elif KP == 4:
                         # Wall
                         f0 = 0.0; f1 = 0.0; f2 = 0.0
                         f3 = ti.cast(HALF_G * H1, ti.f64) * H1
+                    elif KP == 1:
+                        # CalculateKlas1: HB1 from ZT/DZT timeseries (matches native CUDA).
+                        zt_idx = jt * CELL + cell_i
+                        HB1_raw = ZT_field[zt_idx] + DZT_field[zt_idx] * ti.cast(jt, ti.f64) - BI
+                        HB1 = ti.max(HB1_raw, HM2)
+                        FIAL = QL[1] + 6.264 * ti.sqrt(H1)
+                        UR0 = QL[1]
+                        URB = UR0
+                        converged = False
+                        for _ in range(30):
+                            if not converged:
+                                FIAR = URB - 6.264 * ti.sqrt(HB1)
+                                URB_new = (FIAL + FIAR) * (FIAL - FIAR) * (FIAL - FIAR) / HB1 / 313.92
+                                if ti.abs(URB_new - UR0) <= 0.0001:
+                                    URB = URB_new
+                                    converged = True
+                                else:
+                                    UR0 = URB_new
+                                    URB = URB_new
+                        f0 = HB1 * URB
+                        f1 = f0 * URB
+                        f2 = ti.select(QL[1] > 0.0, H1 * QL[1] * QL[2], ti.cast(0.0, ti.f64))
+                        f3 = ti.cast(HALF_G * HB1, ti.f64) * HB1
                     else:
-                        # KP=13 and other unhandled types: native CUDA leaves
-                        # FLUX values from cudaMemset(0) — i.e., all zero.
-                        f0 = 0.0; f1 = 0.0; f2 = 0.0; f3 = 0.0
+                        # KLAS=13 and other unhandled boundary types in native
+                        # BOUNDA still keep the pre-dispatch tangential flux.
+                        f0 = 0.0; f1 = 0.0
+                        f2 = ti.select(QL[1] > 0.0, H1 * QL[1] * QL[2], ti.cast(0.0, ti.f64))
+                        f3 = 0.0
             elif NC < 0:
                 f3 = ti.cast(HALF_G * H1, ti.f64) * H1
             else:
@@ -371,8 +420,7 @@ def run_real(steps=1, backend="cuda", mesh="default", fixed_dt=None):
                 FLR_1 = FLUX1[idx] + FLUX3[idx]
                 FLR_2 = FLUX2[idx]
                 WH += SL * FLUX0[idx]
-                # Split a*b - c*d to force separate mul+sub PTX (avoid Taichi FMA contraction
-                # diverging from nvcc's). This eliminates step-1 U/V ulp drift.
+                # Match native CUDA's non-fused multiply/subtract ordering.
                 t1 = SLCA * FLR_1
                 t2 = SLSA * FLR_2
                 t3 = SLSA * FLR_1
@@ -404,10 +452,16 @@ def run_real(steps=1, backend="cuda", mesh="default", fixed_dt=None):
             Z[i] = Z2
             W[i] = ti.sqrt(U2 * U2 + V2 * V2)
 
+    steps_per_day = max(int(round(float(m.get("MDT", 3600)) / DT)), 1)
     def step_fn():
-        for s in range(steps):
-            calculate_flux(s + 1, 0)
-            update_cell()
+        s = 0
+        for day in range(int(m.get("NDAYS", 50))):
+            for kt in range(1, steps_per_day):
+                if s >= steps:
+                    return
+                calculate_flux(kt, day)
+                update_cell()
+                s += 1
 
     def sync_fn():
         ti.sync()
@@ -422,6 +476,10 @@ def run_real(steps=1, backend="cuda", mesh="default", fixed_dt=None):
     V.from_numpy(V_flat)
     Z.from_numpy(Z_flat)
     W.from_numpy(W_flat)
+    FLUX0.fill(0)
+    FLUX1.fill(0)
+    FLUX2.fill(0)
+    FLUX3.fill(0)
 
     return step_fn, sync_fn, H, U, V, Z, FLUX0, FLUX1, FLUX2, FLUX3
 

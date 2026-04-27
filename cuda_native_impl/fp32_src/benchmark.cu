@@ -106,6 +106,19 @@ int main(int argc, char* argv[]) {
         fwrite(mesh_data.cells.U.data(), sizeof(float), CELL, f);
         fwrite(mesh_data.cells.V.data(), sizeof(float), CELL, f);
         fwrite(mesh_data.cells.Z.data(), sizeof(float), CELL, f);
+        const int NSIDES = CELL * 4;
+        fwrite(mesh_data.sides.SLCOS.data(), sizeof(float), NSIDES, f);
+        fwrite(mesh_data.sides.SLSIN.data(), sizeof(float), NSIDES, f);
+        fwrite(mesh_data.sides.SIDE.data(),  sizeof(float), NSIDES, f);
+        std::vector<Real> flux0(NSIDES), flux1(NSIDES), flux2(NSIDES), flux3(NSIDES);
+        cudaMemcpy(flux0.data(), mesh_view.sides.FLUX0, NSIDES*sizeof(Real), cudaMemcpyDeviceToHost);
+        cudaMemcpy(flux1.data(), mesh_view.sides.FLUX1, NSIDES*sizeof(Real), cudaMemcpyDeviceToHost);
+        cudaMemcpy(flux2.data(), mesh_view.sides.FLUX2, NSIDES*sizeof(Real), cudaMemcpyDeviceToHost);
+        cudaMemcpy(flux3.data(), mesh_view.sides.FLUX3, NSIDES*sizeof(Real), cudaMemcpyDeviceToHost);
+        fwrite(flux0.data(), sizeof(float), NSIDES, f);
+        fwrite(flux1.data(), sizeof(float), NSIDES, f);
+        fwrite(flux2.data(), sizeof(float), NSIDES, f);
+        fwrite(flux3.data(), sizeof(float), NSIDES, f);
         fclose(f);
         printf("Dumped %d cells.\n", CELL);
 

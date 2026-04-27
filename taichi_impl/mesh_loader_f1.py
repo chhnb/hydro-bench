@@ -71,6 +71,21 @@ def load_hydro_mesh(mesh="default"):
     NZ = int(lines[0].split()[0])
     NQ = int(lines[1].split()[0])
 
+    # ---- CALTIME.DAT: DT (timestep size in seconds) ----
+    if os.path.exists(os.path.join(data_dir, "CALTIME.DAT")):
+        ct_lines = rd("CALTIME.DAT")
+        DT = float(ct_lines[1].split()[0]) if len(ct_lines) > 1 else 1.0
+    else:
+        DT = 1.0
+
+    # ---- TIME.DAT: MDT, NDAYS (for ZT timeseries indexing) ----
+    if os.path.exists(os.path.join(data_dir, "TIME.DAT")):
+        time_lines = rd("TIME.DAT")
+        MDT = int(time_lines[0].split()[0])
+        NDAYS = int(time_lines[1].split()[0])
+    else:
+        MDT, NDAYS = 3600, 50
+
     # ---- PXY.DAT: node coordinates ----
     lines = rd("PXY.DAT")
     # First line is count
@@ -252,16 +267,116 @@ def load_hydro_mesh(mesh="default"):
     dry_mask = Z <= ZBC
     H[dry_mask] = HM1
     Z[dry_mask] = ZB1[dry_mask]
+    ghost_mask = NAP[1] == 0
+    H[ghost_mask] = 0.0
     W = np.sqrt(U_init ** 2 + V_init ** 2)
     Z_init = Z  # so the dict below picks up clamped Z
 
+    # ---- BC timeseries: per-cell ZT/DZT for KLAS=1 boundary cells ----
+    #      and per-cell QT/DQT for KLAS=10 boundary cells.
+    # Native CUDA mesh.cpp reads MBZ/MBQ.DAT to get boundary cells (1-indexed),
+    # then BOUNDE/NZ/NZ{group:04d}.DAT and BOUNDE/NQ/NQ{group:04d}.DAT for
+    # each group's water-level / flow-rate timeseries.
+    # Layout: flat [NDAYS * CELL] arrays, 0-indexed by cell.
+    ZT = np.zeros(NDAYS * CEL, dtype=np.float64)
+    DZT = np.zeros(NDAYS * CEL, dtype=np.float64)
+    QT = np.zeros(NDAYS * CEL, dtype=np.float64)
+    DQT = np.zeros(NDAYS * CEL, dtype=np.float64)
+    K0 = int(MDT / DT) if DT > 0 else 1
+
+    def _load_bounde_group(subdir_name, prefix):
+        bounde_dir = os.path.join(data_dir, "BOUNDE", subdir_name)
+        out = {}
+        if not os.path.isdir(bounde_dir):
+            return out
+        for fn in os.listdir(bounde_dir):
+            if not (fn.startswith(prefix) and fn.endswith(".DAT")):
+                continue
+            try:
+                gid = int(fn[len(prefix):len(prefix)+4])
+            except ValueError:
+                continue
+            vals = []
+            with open(os.path.join(bounde_dir, fn), 'r', encoding='latin-1') as f:
+                first = True
+                for line in f:
+                    s = line.strip()
+                    if not s:
+                        continue
+                    parts = s.split()
+                    if first and len(parts) == 1:
+                        first = False
+                        continue
+                    first = False
+                    if len(parts) >= 2:
+                        try:
+                            # Native stores BOUNDRYinterp output in a float
+                            # temporary even in the fp64 build.
+                            vals.append(float(np.float32(float(parts[1]))))
+                        except ValueError:
+                            continue
+            if vals:
+                out[gid] = vals
+        return out
+    def _read_mbx(filename):
+        path = os.path.join(data_dir, filename)
+        if not os.path.exists(path):
+            return []
+        out = []
+        for line in rd(filename):
+            parts = line.split()
+            if len(parts) >= 3:
+                try:
+                    out.append((int(parts[1]) - 1, int(parts[2])))  # (cell_0idx, group_id)
+                except ValueError:
+                    continue
+        return out
+
+    # KLAS=1: water level
+    if NZ > 0:
+        MBZ_cells = _read_mbx("MBZ.DAT")
+        nz_data = _load_bounde_group("NZ", "NZ")
+        # group_size: how many cells share a group (Native divides timeseries value)
+        group_count_z = {}
+        for _, gid in MBZ_cells:
+            group_count_z[gid] = group_count_z.get(gid, 0) + 1
+        for cell_0idx, group_id in MBZ_cells:
+            if group_id in nz_data:
+                wl = nz_data[group_id]
+                for day in range(NDAYS):
+                    z_day = wl[min(day, len(wl) - 1)]
+                    ZT[day * CEL + cell_0idx] = z_day
+                    if day < NDAYS - 1 and K0 > 0:
+                        z_next = wl[min(day + 1, len(wl) - 1)]
+                        DZT[day * CEL + cell_0idx] = (z_next - z_day) / K0
+
+    # KLAS=10: flow rate (per cell = Q_group / group_size, divided in native)
+    if NQ > 0:
+        MBQ_cells = _read_mbx("MBQ.DAT")
+        nq_data = _load_bounde_group("NQ", "NQ")
+        group_count_q = {}
+        for _, gid in MBQ_cells:
+            group_count_q[gid] = group_count_q.get(gid, 0) + 1
+        for cell_0idx, group_id in MBQ_cells:
+            if group_id in nq_data:
+                qs = nq_data[group_id]
+                kl = max(group_count_q.get(group_id, 1), 1)
+                for day in range(NDAYS):
+                    q_day = float(np.float32(np.float32(qs[min(day, len(qs) - 1)]) / np.float32(kl)))
+                    QT[day * CEL + cell_0idx] = q_day
+                    if day < NDAYS - 1 and K0 > 0:
+                        q_next = float(np.float32(np.float32(qs[min(day + 1, len(qs) - 1)]) / np.float32(kl)))
+                        DQT[day * CEL + cell_0idx] = (q_next - q_day) / K0
+
     return dict(
-        CEL=CEL, NOD=NOD, HM1=HM1, HM2=HM2, NZ=NZ, NQ=NQ,
+        CEL=CEL, NOD=NOD, HM1=HM1, HM2=HM2, NZ=NZ, NQ=NQ, DT=DT,
+        MDT=MDT, NDAYS=NDAYS,
         NAC=NAC, KLAS=KLAS, SIDE=SIDE, COSF=COSF, SINF=SINF,
         SLCOS=SLCOS, SLSIN=SLSIN,
         AREA=AREA, ZBC=ZBC, ZB1=ZB1, FNC=FNC, NV=NV,
         H=H, U=U_init.copy(), V=V_init.copy(), Z=Z_init.copy(), W=W,
         MBQ=MBQ, NNQ=NNQ, MBZ=MBZ, NNZ=NNZ,
+        ZT=ZT, DZT=DZT, QT=QT, DQT=DQT,
         XC=XC, YC=YC,
     )
 

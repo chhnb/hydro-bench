@@ -33,7 +33,7 @@ def run_real(steps=1, backend="cuda", mesh="default", fixed_dt=None):
     NE = 4 * CELL
     HM1 = float(m["HM1"])
     HM2 = float(m["HM2"])
-    DT = float(fixed_dt) if fixed_dt else 1.0
+    DT = float(fixed_dt) if fixed_dt else float(m.get("DT", 1.0))
 
     # --- Convert F1's 2D 1-indexed mesh to F2's flat NE arrays (0-indexed) ---
     # F1 layout: NAC[j, pos] for j in 1..4, pos in 1..CELL
@@ -90,6 +90,16 @@ def run_real(steps=1, backend="cuda", mesh="default", fixed_dt=None):
     AREA = ti.field(ti.f32, shape=CELL)
     FNC = ti.field(ti.f32, shape=CELL)
 
+    NDAYS = int(m.get("NDAYS", 50))
+    ZT_field  = ti.field(ti.f32, shape=NDAYS * CELL)
+    DZT_field = ti.field(ti.f32, shape=NDAYS * CELL)
+    QT_field  = ti.field(ti.f32, shape=NDAYS * CELL)
+    DQT_field = ti.field(ti.f32, shape=NDAYS * CELL)
+    ZT_field.from_numpy(m["ZT"].astype(np.float32))
+    DZT_field.from_numpy(m["DZT"].astype(np.float32))
+    QT_field.from_numpy(m["QT"].astype(np.float32))
+    DQT_field.from_numpy(m["DQT"].astype(np.float32))
+
     NAC.from_numpy(NAC_flat)
     KLAS.from_numpy(KLAS_flat)
     SIDE.from_numpy(SIDE_flat)
@@ -109,19 +119,55 @@ def run_real(steps=1, backend="cuda", mesh="default", fixed_dt=None):
 
     # --- Riemann solver (Osher) ---
     @ti.func
+    def f64_ratio(num: ti.template(), den: ti.template()) -> ti.f64:
+        return ti.cast(num, ti.f64) / ti.cast(den, ti.f64)
+
+    @ti.func
+    def half_g_h2_f32(h: ti.f32) -> ti.f32:
+        return ti.cast(f64_ratio(4905, 1000) * ti.cast(h, ti.f64) * ti.cast(h, ti.f64), ti.f32)
+
+    @ti.func
+    def sqrt_g_h_f32(h: ti.f32) -> ti.f32:
+        return ti.sqrt(ti.cast(f64_ratio(981, 100) * ti.cast(h, ti.f64), ti.f32))
+
+    @ti.func
+    def div_9_81_f32(x: ti.f32) -> ti.f32:
+        return ti.cast(ti.cast(x, ti.f64) / f64_ratio(981, 100), ti.f32)
+
+    @ti.func
+    def div_39_24_f32(x: ti.f32) -> ti.f32:
+        return ti.cast(ti.cast(x, ti.f64) / f64_ratio(3924, 100), ti.f32)
+
+    @ti.func
+    def sqrt_div_4_905_f32(x: ti.f32) -> ti.f32:
+        return ti.sqrt(ti.cast(ti.cast(x, ti.f64) / f64_ratio(4905, 1000), ti.f32))
+
+    @ti.func
+    def sqrt_mul_6_264_f32(h: ti.f32) -> ti.f32:
+        return ti.cast(f64_ratio(6264, 1000) * ti.cast(ti.sqrt(h), ti.f64), ti.f32)
+
+    @ti.func
+    def div_313_92_f32(x: ti.f32) -> ti.f32:
+        return ti.cast(ti.cast(x, ti.f64) / f64_ratio(31392, 100), ti.f32)
+
+    @ti.func
     def QF(h: ti.f32, u: ti.f32, v: ti.f32) -> ti.types.vector(4, ti.f32):
         hu = h * u
-        return ti.Vector([hu, hu * u, hu * v, ti.cast(HALF_G * h, ti.f32) * h])
+        return ti.Vector([hu, hu * u, hu * v, half_g_h2_f32(h)])
+
+    @ti.func
+    def native_mul_pow_f32(c: ti.f32, x: ti.f32, p: ti.f64) -> ti.f32:
+        return ti.cast(ti.cast(c, ti.f64) * ti.pow(ti.cast(x, ti.f64), p), ti.f32)
 
     @ti.func
     def osher(QL: ti.types.vector(3, ti.f32),
               QR: ti.types.vector(3, ti.f32),
               FIL_in: ti.f32, H_pos: ti.f32) -> ti.types.vector(4, ti.f32):
-        CR = ti.sqrt(G * QR[0])
+        CR = sqrt_g_h_f32(QR[0])
         FIR_v = QR[1] - 2.0 * CR
         UA = (FIL_in + FIR_v) / 2.0
         CA = ti.abs((FIL_in - FIR_v) / 4.0)
-        CL_v = ti.sqrt(G * H_pos)
+        CL_v = sqrt_g_h_f32(H_pos)
         FLR = ti.Vector([0.0, 0.0, 0.0, 0.0])
         K2 = 0
         if CA < UA: K2 = 1
@@ -137,55 +183,55 @@ def run_real(steps=1, backend="cuda", mesh="default", fixed_dt=None):
         fir = FIR_v
         if K1 == 1:
             if K2 == 1:
-                US = fil / 3.0; HS = US * US / G
+                US = fil / 3.0; HS = div_9_81_f32(US * US)
                 FLR += QF(HS, US, QL[2])
             elif K2 == 2:
-                ua = (fil + fir) / 2.0; fil = fil - ua; HA = fil * fil / (4.0 * G)
+                ua = (fil + fir) / 2.0; fil = fil - ua; HA = div_39_24_f32(fil * fil)
                 FLR += QF(HA, ua, QL[2])
             elif K2 == 3:
-                ua = (fil + fir) / 2.0; fir = fir - ua; HA = fir * fir / (4.0 * G)
+                ua = (fil + fir) / 2.0; fir = fir - ua; HA = div_39_24_f32(fir * fir)
                 FLR += QF(HA, ua, QR[2])
             else:
-                US = fir / 3.0; HS = US * US / G
+                US = fir / 3.0; HS = div_9_81_f32(US * US)
                 FLR += QF(HS, US, QR[2])
         elif K1 == 2:
             if K2 == 1:
                 FLR += QF(QL[0], QL[1], QL[2])
             elif K2 == 2:
                 FLR += QF(QL[0], QL[1], QL[2])
-                US2 = fil / 3.0; HS2 = US2 * US2 / G
+                US2 = fil / 3.0; HS2 = div_9_81_f32(US2 * US2)
                 FLR -= QF(HS2, US2, QL[2])
-                ua = (fil + fir) / 2.0; fil = fil - ua; HA = fil * fil / (4.0 * G)
+                ua = (fil + fir) / 2.0; fil = fil - ua; HA = div_39_24_f32(fil * fil)
                 FLR += QF(HA, ua, QL[2])
             elif K2 == 3:
                 FLR += QF(QL[0], QL[1], QL[2])
-                US2 = fil / 3.0; HS2 = US2 * US2 / G
+                US2 = fil / 3.0; HS2 = div_9_81_f32(US2 * US2)
                 FLR -= QF(HS2, US2, QL[2])
-                ua = (fil + fir) / 2.0; fir = fir - ua; HA = fir * fir / (4.0 * G)
+                ua = (fil + fir) / 2.0; fir = fir - ua; HA = div_39_24_f32(fir * fir)
                 FLR += QF(HA, ua, QR[2])
             else:
                 FLR += QF(QL[0], QL[1], QL[2])
-                US2 = fil / 3.0; HS2 = US2 * US2 / G
+                US2 = fil / 3.0; HS2 = div_9_81_f32(US2 * US2)
                 FLR -= QF(HS2, US2, QL[2])
-                US6 = fir / 3.0; HS6 = US6 * US6 / G
+                US6 = fir / 3.0; HS6 = div_9_81_f32(US6 * US6)
                 FLR += QF(HS6, US6, QR[2])
         elif K1 == 3:
             if K2 == 1:
-                US2 = fil / 3.0; HS2 = US2 * US2 / G
+                US2 = fil / 3.0; HS2 = div_9_81_f32(US2 * US2)
                 FLR += QF(HS2, US2, QL[2])
-                US6 = fir / 3.0; HS6 = US6 * US6 / G
+                US6 = fir / 3.0; HS6 = div_9_81_f32(US6 * US6)
                 FLR -= QF(HS6, US6, QR[2])
                 FLR += QF(QR[0], QR[1], QR[2])
             elif K2 == 2:
-                ua = (fil + fir) / 2.0; fil = fil - ua; HA = fil * fil / (4.0 * G)
+                ua = (fil + fir) / 2.0; fil = fil - ua; HA = div_39_24_f32(fil * fil)
                 FLR += QF(HA, ua, QL[2])
-                US6 = fir / 3.0; HS6 = US6 * US6 / G
+                US6 = fir / 3.0; HS6 = div_9_81_f32(US6 * US6)
                 FLR -= QF(HS6, US6, QR[2])
                 FLR += QF(QR[0], QR[1], QR[2])
             elif K2 == 3:
-                ua = (fil + fir) / 2.0; fir = fir - ua; HA = fir * fir / (4.0 * G)
+                ua = (fil + fir) / 2.0; fir = fir - ua; HA = div_39_24_f32(fir * fir)
                 FLR += QF(HA, ua, QR[2])
-                US6b = fir / 3.0; HS6b = US6b * US6b / G
+                US6b = fir / 3.0; HS6b = div_9_81_f32(US6b * US6b)
                 FLR -= QF(HS6b, US6b, QR[2])
                 FLR += QF(QR[0], QR[1], QR[2])
             else:
@@ -193,30 +239,30 @@ def run_real(steps=1, backend="cuda", mesh="default", fixed_dt=None):
         else:
             if K2 == 1:
                 FLR += QF(QL[0], QL[1], QL[2])
-                US6 = fir / 3.0; HS6 = US6 * US6 / G
+                US6 = fir / 3.0; HS6 = div_9_81_f32(US6 * US6)
                 FLR -= QF(HS6, US6, QR[2])
                 FLR += QF(QR[0], QR[1], QR[2])
             elif K2 == 2:
                 FLR += QF(QL[0], QL[1], QL[2])
-                US2 = fil / 3.0; HS2 = US2 * US2 / G
+                US2 = fil / 3.0; HS2 = div_9_81_f32(US2 * US2)
                 FLR -= QF(HS2, US2, QL[2])
-                ua = (fil + fir) / 2.0; fil = fil - ua; HA = fil * fil / (4.0 * G)
+                ua = (fil + fir) / 2.0; fil = fil - ua; HA = div_39_24_f32(fil * fil)
                 FLR += QF(HA, ua, QL[2])
-                US6 = fir / 3.0; HS6 = US6 * US6 / G
+                US6 = fir / 3.0; HS6 = div_9_81_f32(US6 * US6)
                 FLR -= QF(HS6, US6, QR[2])
                 FLR += QF(QR[0], QR[1], QR[2])
             elif K2 == 3:
                 FLR += QF(QL[0], QL[1], QL[2])
-                US2 = fil / 3.0; HS2 = US2 * US2 / G
+                US2 = fil / 3.0; HS2 = div_9_81_f32(US2 * US2)
                 FLR -= QF(HS2, US2, QL[2])
-                ua = (fil + fir) / 2.0; fir = fir - ua; HA = fir * fir / (4.0 * G)
+                ua = (fil + fir) / 2.0; fir = fir - ua; HA = div_39_24_f32(fir * fir)
                 FLR += QF(HA, ua, QR[2])
-                US6 = fir / 3.0; HS6 = US6 * US6 / G
+                US6 = fir / 3.0; HS6 = div_9_81_f32(US6 * US6)
                 FLR -= QF(HS6, US6, QR[2])
                 FLR += QF(QR[0], QR[1], QR[2])
             else:
                 FLR += QF(QL[0], QL[1], QL[2])
-                US2 = fil / 3.0; HS2 = US2 * US2 / G
+                US2 = fil / 3.0; HS2 = div_9_81_f32(US2 * US2)
                 FLR -= QF(HS2, US2, QL[2])
                 FLR += QF(QR[0], QR[1], QR[2])
         return FLR
@@ -239,38 +285,77 @@ def run_real(steps=1, backend="cuda", mesh="default", fixed_dt=None):
             COSJ = COSF[idx]
             SINJ = SINF[idx]
             QL = ti.Vector([H1, U1 * COSJ + V1 * SINJ, V1 * COSJ - U1 * SINJ])
-            CL_v = ti.sqrt(G * H1)
+            CL_v = sqrt_g_h_f32(H1)
             FIL_v = QL[1] + 2.0 * CL_v
 
             f0 = 0.0; f1 = 0.0; f2 = 0.0; f3 = 0.0
             if (KP >= 1 and KP <= 8) or KP >= 10:
-                CL_b = ti.sqrt(G * H1)
+                CL_b = sqrt_g_h_f32(H1)
                 if QL[1] > CL_b and H1 < HM2:
                     # Supercritical outflow
                     f0 = H1 * QL[1]
                     f1 = f0 * QL[1]
                     f2 = f0 * QL[2]
-                    f3 = ti.cast(HALF_G * H1, ti.f32) * H1
+                    f3 = half_g_h2_f32(H1)
                 else:
                     # Boundary dispatch (matches native CUDA BOUNDA function)
                     if KP == 10:
-                        # CalculateKlas10 with QT=0: HB = FIL²/39.24 (iteration converges to this).
-                        # We compute directly to avoid FP non-determinism in the iteration's break condition.
-                        HB = FIL_v * FIL_v / 39.24
-                        f0 = 0.0
-                        f1 = 0.0
+                        # CalculateKlas10: native uses iterative HB convergence with QT/DQT.
+                        SIDE_e = SIDE[idx]
+                        zt_idx = jt * CELL + cell_i
+                        flux0_kl10 = -(QT_field[zt_idx] + DQT_field[zt_idx] * ti.cast(kt, ti.f32)) / SIDE_e
+                        QB2 = flux0_kl10 * flux0_kl10
+                        HB0 = H1
+                        HB = ti.cast(0.0, ti.f32)
+                        converged_k10 = False
+                        for _ in range(20):
+                            if not converged_k10:
+                                W_temp = FIL_v - flux0_kl10 / HB0
+                                HB = div_39_24_f32(W_temp * W_temp)
+                                if ti.abs(HB0 - HB) <= 0.005:
+                                    converged_k10 = True
+                                else:
+                                    HB0 = HB0 * 0.5 + HB * 0.5
+                        f0 = flux0_kl10
+                        f1 = ti.select(HB <= 1.0, ti.cast(0.0, ti.f32), QB2 / HB)
                         f2 = 0.0
-                        f3 = ti.cast(HALF_G * HB, ti.f32) * HB
+                        f3 = half_g_h2_f32(HB)
                     elif KP == 4:
                         # Wall
                         f0 = 0.0; f1 = 0.0; f2 = 0.0
-                        f3 = ti.cast(HALF_G * H1, ti.f32) * H1
+                        f3 = half_g_h2_f32(H1)
+                    elif KP == 1:
+                        # CalculateKlas1: HB1 from ZT/DZT timeseries (matches native CUDA).
+                        zt_idx = jt * CELL + cell_i
+                        HB1_raw = ZT_field[zt_idx] + DZT_field[zt_idx] * ti.cast(jt, ti.f32) - BI
+                        HB1 = ti.max(HB1_raw, HM2)
+                        FIAL = ti.cast(ti.cast(QL[1], ti.f64) + ti.cast(sqrt_mul_6_264_f32(H1), ti.f64), ti.f32)
+                        UR0 = QL[1]
+                        URB = UR0
+                        converged = False
+                        for _ in range(30):
+                            if not converged:
+                                FIAR = ti.cast(ti.cast(URB, ti.f64) - ti.cast(sqrt_mul_6_264_f32(HB1), ti.f64), ti.f32)
+                                urb_num = (FIAL + FIAR) * (FIAL - FIAR) * (FIAL - FIAR) / HB1
+                                URB_new = div_313_92_f32(urb_num)
+                                if ti.abs(URB_new - UR0) <= 0.0001:
+                                    URB = URB_new
+                                    converged = True
+                                else:
+                                    UR0 = URB_new
+                                    URB = URB_new
+                        f0 = HB1 * URB
+                        f1 = f0 * URB
+                        f2 = ti.select(QL[1] > 0.0, H1 * QL[1] * QL[2], ti.cast(0.0, ti.f32))
+                        f3 = half_g_h2_f32(HB1)
                     else:
-                        # KP=13 and other unhandled types: native CUDA leaves
-                        # FLUX values from cudaMemset(0) — i.e., all zero.
-                        f0 = 0.0; f1 = 0.0; f2 = 0.0; f3 = 0.0
+                        # KLAS=13 and other unhandled boundary types in native
+                        # BOUNDA still keep the pre-dispatch tangential flux.
+                        f0 = 0.0; f1 = 0.0
+                        f2 = ti.select(QL[1] > 0.0, H1 * QL[1] * QL[2], ti.cast(0.0, ti.f32))
+                        f3 = 0.0
             elif NC < 0:
-                f3 = ti.cast(HALF_G * H1, ti.f32) * H1
+                f3 = half_g_h2_f32(H1)
             else:
                 HC = ti.max(H[NC], HM1)
                 BC = ZBC[NC]
@@ -280,11 +365,11 @@ def run_real(steps=1, backend="cuda", mesh="default", fixed_dt=None):
                 if H1 <= HM1 and HC <= HM1:
                     pass
                 elif ZI <= BC:
-                    f0 = -C1 * ti.pow(HC, ti.cast(1.5, ti.f32))
+                    f0 = -native_mul_pow_f32(C1, HC, 1.5)
                     f1 = H1 * QL[1] * ti.abs(QL[1])
-                    f3 = ti.cast(HALF_G * H1, ti.f32) * H1
+                    f3 = half_g_h2_f32(H1)
                 elif ZC <= BI:
-                    f0 = C1 * ti.pow(H1, ti.cast(1.5, ti.f32))
+                    f0 = native_mul_pow_f32(C1, H1, 1.5)
                     f1 = H1 * ti.abs(QL[1]) * QL[1]
                     f2 = H1 * ti.abs(QL[1]) * QL[2]
                 elif H1 <= HM2:
@@ -294,10 +379,10 @@ def run_real(steps=1, backend="cuda", mesh="default", fixed_dt=None):
                         f0 = DH * UN
                         f1 = f0 * UN
                         f2 = f0 * (VC * COSJ - UC * SINJ)
-                        f3 = ti.cast(HALF_G * H1, ti.f32) * H1
+                        f3 = half_g_h2_f32(H1)
                     else:
-                        f0 = C1 * ti.pow(H1, ti.cast(1.5, ti.f32))
-                        f3 = ti.cast(HALF_G * H1, ti.f32) * H1
+                        f0 = native_mul_pow_f32(C1, H1, 1.5)
+                        f3 = half_g_h2_f32(H1)
                 elif HC <= HM2:
                     if ZI > ZC:
                         DH = ti.max(ZI - BC, HM1)
@@ -306,11 +391,11 @@ def run_real(steps=1, backend="cuda", mesh="default", fixed_dt=None):
                         f0 = DH * UN
                         f1 = f0 * UN
                         f2 = f0 * QL[2]
-                        f3 = ti.cast(HALF_G * HC1, ti.f32) * HC1
+                        f3 = half_g_h2_f32(HC1)
                     else:
-                        f0 = -C1 * ti.pow(HC, ti.cast(1.5, ti.f32))
+                        f0 = -native_mul_pow_f32(C1, HC, 1.5)
                         f1 = H1 * QL[1] * QL[1]
-                        f3 = ti.cast(HALF_G * H1, ti.f32) * H1
+                        f3 = half_g_h2_f32(H1)
                 else:
                     if cell_i < NC:
                         QR_h = ti.max(ZC - BI, HM1)
@@ -331,7 +416,7 @@ def run_real(steps=1, backend="cuda", mesh="default", fixed_dt=None):
                         SINJ1 = -SINJ
                         QL1 = ti.Vector([H[NC], U[NC] * COSJ1 + V[NC] * SINJ1,
                                           V[NC] * COSJ1 - U[NC] * SINJ1])
-                        CL1 = ti.sqrt(G * H[NC])
+                        CL1 = sqrt_g_h_f32(H[NC])
                         FIL1 = QL1[1] + 2.0 * CL1
                         HC2 = ti.max(H1, HM1)
                         ZC1 = ti.max(BI, ZI)
@@ -347,9 +432,9 @@ def run_real(steps=1, backend="cuda", mesh="default", fixed_dt=None):
                         f0 = -FLR1[0]
                         f1 = FLR1[1] + (1.0 - ratio1) * HC2 * UR1 * UR1 / 2.0
                         f2 = FLR1[2]
-                        ZA = ti.sqrt(FLR1[3] / HALF_G) + BC
+                        ZA = sqrt_div_4_905_f32(FLR1[3]) + BC
                         HC3 = ti.max(ZA - BI, ti.cast(0.0, ti.f32))
-                        f3 = ti.cast(HALF_G * HC3, ti.f32) * HC3
+                        f3 = half_g_h2_f32(HC3)
 
             FLUX0[idx] = f0
             FLUX1[idx] = f1
@@ -371,8 +456,7 @@ def run_real(steps=1, backend="cuda", mesh="default", fixed_dt=None):
                 FLR_1 = FLUX1[idx] + FLUX3[idx]
                 FLR_2 = FLUX2[idx]
                 WH += SL * FLUX0[idx]
-                # Split a*b - c*d to force separate mul+sub PTX (avoid Taichi FMA contraction
-                # diverging from nvcc's). This eliminates step-1 U/V ulp drift.
+                # Match native CUDA's non-fused multiply/subtract ordering.
                 t1 = SLCA * FLR_1
                 t2 = SLSA * FLR_2
                 t3 = SLSA * FLR_1
@@ -392,7 +476,8 @@ def run_real(steps=1, backend="cuda", mesh="default", fixed_dt=None):
                     QY1 = H1 * V1
                     DTAU = DTA * WU
                     DTAV = DTA * WV
-                    WSF = FNC[i] * ti.sqrt(U1 * U1 + V1 * V1) / ti.pow(H1, ti.cast(0.33333, ti.f32))
+                    WSF_num = FNC[i] * ti.sqrt(U1 * U1 + V1 * V1)
+                    WSF = ti.cast(ti.cast(WSF_num, ti.f64) / ti.pow(ti.cast(H1, ti.f64), f64_ratio(33333, 100000)), ti.f32)
                     U2 = (QX1 - DTAU - ti.cast(DT, ti.f32) * WSF * U1) / H2
                     V2 = (QY1 - DTAV - ti.cast(DT, ti.f32) * WSF * V1) / H2
                     if H2 > HM2:
@@ -404,10 +489,16 @@ def run_real(steps=1, backend="cuda", mesh="default", fixed_dt=None):
             Z[i] = Z2
             W[i] = ti.sqrt(U2 * U2 + V2 * V2)
 
+    steps_per_day = max(int(round(float(m.get("MDT", 3600)) / DT)), 1)
     def step_fn():
-        for s in range(steps):
-            calculate_flux(s + 1, 0)
-            update_cell()
+        s = 0
+        for day in range(int(m.get("NDAYS", 50))):
+            for kt in range(1, steps_per_day):
+                if s >= steps:
+                    return
+                calculate_flux(kt, day)
+                update_cell()
+                s += 1
 
     def sync_fn():
         ti.sync()
@@ -422,6 +513,10 @@ def run_real(steps=1, backend="cuda", mesh="default", fixed_dt=None):
     V.from_numpy(V_flat)
     Z.from_numpy(Z_flat)
     W.from_numpy(W_flat)
+    FLUX0.fill(0)
+    FLUX1.fill(0)
+    FLUX2.fill(0)
+    FLUX3.fill(0)
 
     return step_fn, sync_fn, H, U, V, Z, FLUX0, FLUX1, FLUX2, FLUX3
 

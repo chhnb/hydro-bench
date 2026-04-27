@@ -17,7 +17,8 @@ struct MeshData {
     int NDI;
     int NWE;
     int NOD;
-    int MDT, DT;
+    int MDT;
+    Real DT;
     int NTOUTPUT;       // 输出时间步长
     int dummy;          // 占位符
     Real HM1, HM2;
@@ -117,7 +118,7 @@ struct MeshView {
     const int NWE;
     const int NDAYS;
     const int CELL;
-    const int DT;
+    const Real DT;
     const Real HM1, HM2;
     const Real JL;
 

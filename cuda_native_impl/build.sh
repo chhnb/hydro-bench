@@ -8,7 +8,7 @@ export LD_LIBRARY_PATH=/home/scratch.huanhuanc_gpu/spmd/cuda-toolkit/lib64:$LD_L
 # Detect GPU arch
 ARCH=${1:-sm_80}  # default A100; pass sm_86 for 3060, sm_90 for B200
 
-nvcc -O3 -arch=$ARCH -rdc=true --std=c++17 \
+nvcc -O3 -arch=$ARCH -rdc=true --std=c++17 --fmad=false \
     -I"$DIR/hydro-cal-src/include" \
     "$DIR/benchmark.cu" \
     "$DIR/hydro-cal-src/src/functors.cu" \

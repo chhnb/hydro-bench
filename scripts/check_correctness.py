@@ -62,7 +62,7 @@ def dump_native_cuda(case, steps):
     bin_name, data_subdir, sz = case_config(case)
     bin_path = os.path.join(NATIVE_DIR, bin_name)
     cwd = os.path.join(NATIVE_DIR, data_subdir, "run")
-    dump_file = os.path.join(cwd, f"native_dump_{case}.bin")
+    dump_file = os.path.join(cwd, f"native_dump_{case}_{steps}_{os.getpid()}.bin")
 
     if os.path.exists(dump_file):
         os.remove(dump_file)
@@ -81,7 +81,14 @@ def dump_native_cuda(case, steps):
         U = np.frombuffer(f.read(cell * sz), dtype=dtype).copy()
         V = np.frombuffer(f.read(cell * sz), dtype=dtype).copy()
         Z = np.frombuffer(f.read(cell * sz), dtype=dtype).copy()
-    return {"cell": cell, "H": H, "U": U, "V": V, "Z": Z}
+        nsides = cell * 4
+        f.read(nsides * sz * 3)  # SLCOS, SLSIN, SIDE
+        F0 = np.frombuffer(f.read(nsides * sz), dtype=dtype).copy()
+        F1 = np.frombuffer(f.read(nsides * sz), dtype=dtype).copy()
+        F2 = np.frombuffer(f.read(nsides * sz), dtype=dtype).copy()
+        F3 = np.frombuffer(f.read(nsides * sz), dtype=dtype).copy()
+    return {"cell": cell, "H": H, "U": U, "V": V, "Z": Z,
+            "F0": F0, "F1": F1, "F2": F2, "F3": F3}
 
 
 def dump_taichi(case, steps):
@@ -97,37 +104,61 @@ steps = {steps}
 
 if case.startswith('F1'):
     if 'fp64' in case:
-        ti.init(arch=ti.cuda, default_fp=ti.f64)
         from F1_hydro_taichi_2kernel_fp64 import run_real
     else:
-        ti.init(arch=ti.cuda, default_fp=ti.f32)
         from F1_hydro_taichi_2kernel_fp32 import run_real
     mesh = '20w' if '207K' in case else 'default'
     result = run_real(steps=steps, backend='cuda', mesh=mesh)
-    step_fn, sync_fn, H = result[:3]
-    # F1 might have separate U_res etc; let me just dump H for now
+    step_fn, sync_fn, H, U, V, Z, F0, F1, F2, F3 = result[:10]
     step_fn(); sync_fn()
     H_arr = H.to_numpy()
-    out_path = '{NATIVE_DIR}/' + case + '_taichi_dump.bin'
+    U_arr = U.to_numpy()
+    V_arr = V.to_numpy()
+    Z_arr = Z.to_numpy()
+    F0_arr = F0.to_numpy()
+    F1_arr = F1.to_numpy()
+    F2_arr = F2.to_numpy()
+    F3_arr = F3.to_numpy()
+    out_path = '{NATIVE_DIR}/' + case + '_taichi_dump_' + str(steps) + '_' + str(os.getpid()) + '.bin'
     with open(out_path, 'wb') as f:
         f.write(struct.pack('i', H_arr.size))
         f.write(H_arr.astype(H_arr.dtype).tobytes())
+        f.write(U_arr.astype(U_arr.dtype).tobytes())
+        f.write(V_arr.astype(V_arr.dtype).tobytes())
+        f.write(Z_arr.astype(Z_arr.dtype).tobytes())
+        f.write(F0_arr.astype(F0_arr.dtype).tobytes())
+        f.write(F1_arr.astype(F1_arr.dtype).tobytes())
+        f.write(F2_arr.astype(F2_arr.dtype).tobytes())
+        f.write(F3_arr.astype(F3_arr.dtype).tobytes())
     print('TAICHI_DUMP=' + out_path + ' size=' + str(H_arr.size))
 else:
     if 'fp64' in case:
-        ti.init(arch=ti.cuda, default_fp=ti.f64)
         from F2_hydro_taichi_fp64 import run
     else:
-        ti.init(arch=ti.cuda, default_fp=ti.f32)
         from F2_hydro_taichi_fp32 import run
     mesh = '20w' if '207K' in case else 'default'
-    step_fn, sync_fn, H = run(days=1, backend='cuda', mesh=mesh, steps=steps)
+    result = run(days=1, backend='cuda', mesh=mesh, steps=steps)
+    step_fn, sync_fn, H, U, V, Z, F0, F1, F2, F3 = result[:10]
     step_fn(); sync_fn()
     H_arr = H.to_numpy()
-    out_path = '{NATIVE_DIR}/' + case + '_taichi_dump.bin'
+    U_arr = U.to_numpy()
+    V_arr = V.to_numpy()
+    Z_arr = Z.to_numpy()
+    F0_arr = F0.to_numpy()
+    F1_arr = F1.to_numpy()
+    F2_arr = F2.to_numpy()
+    F3_arr = F3.to_numpy()
+    out_path = '{NATIVE_DIR}/' + case + '_taichi_dump_' + str(steps) + '_' + str(os.getpid()) + '.bin'
     with open(out_path, 'wb') as f:
         f.write(struct.pack('i', H_arr.size))
         f.write(H_arr.astype(H_arr.dtype).tobytes())
+        f.write(U_arr.astype(U_arr.dtype).tobytes())
+        f.write(V_arr.astype(V_arr.dtype).tobytes())
+        f.write(Z_arr.astype(Z_arr.dtype).tobytes())
+        f.write(F0_arr.astype(F0_arr.dtype).tobytes())
+        f.write(F1_arr.astype(F1_arr.dtype).tobytes())
+        f.write(F2_arr.astype(F2_arr.dtype).tobytes())
+        f.write(F3_arr.astype(F3_arr.dtype).tobytes())
     print('TAICHI_DUMP=' + out_path + ' size=' + str(H_arr.size))
 """
     r = subprocess.run([PY, "-c", code], capture_output=True, text=True, timeout=300)
@@ -146,7 +177,16 @@ else:
     with open(dump_path, "rb") as f:
         cell = struct.unpack("i", f.read(4))[0]
         H = np.frombuffer(f.read(cell * sz), dtype=dtype).copy()
-    return {"cell": cell, "H": H}
+        U = np.frombuffer(f.read(cell * sz), dtype=dtype).copy()
+        V = np.frombuffer(f.read(cell * sz), dtype=dtype).copy()
+        Z = np.frombuffer(f.read(cell * sz), dtype=dtype).copy()
+        nsides = cell * 4
+        F0 = np.frombuffer(f.read(nsides * sz), dtype=dtype).copy()
+        F1 = np.frombuffer(f.read(nsides * sz), dtype=dtype).copy()
+        F2 = np.frombuffer(f.read(nsides * sz), dtype=dtype).copy()
+        F3 = np.frombuffer(f.read(nsides * sz), dtype=dtype).copy()
+    return {"cell": cell, "H": H, "U": U, "V": V, "Z": Z,
+            "F0": F0, "F1": F1, "F2": F2, "F3": F3}
 
 
 def compare(case, steps):
@@ -165,35 +205,57 @@ def compare(case, steps):
         print("  SKIP — Taichi failed")
         return None
 
-    # Match dimensions: native = CELL elements (0-indexed), Taichi may have CELL+1 (1-indexed)
-    nH = native["H"]
-    tH = taichi["H"]
-    if len(tH) == len(nH) + 1:
-        tH = tH[1:]  # drop sentinel
-    n = min(len(nH), len(tH))
-    nH, tH = nH[:n], tH[:n]
+    metrics = {}
+    print("  Field comparison:")
+    for field in ("H", "U", "V", "Z"):
+        n_arr = native[field]
+        t_arr = taichi[field]
+        if len(t_arr) == len(n_arr) + 1:
+            t_arr = t_arr[1:]  # drop sentinel
+        n = min(len(n_arr), len(t_arr))
+        n_arr, t_arr = n_arr[:n], t_arr[:n]
+        finite_mask = np.isfinite(n_arr) & np.isfinite(t_arr)
+        n_f = n_arr[finite_mask]
+        t_f = t_arr[finite_mask]
+        if len(n_f) == 0:
+            print(f"    {field}: ALL NaN/Inf — skip")
+            continue
+        abs_diff = np.abs(n_f - t_f)
+        denom = np.maximum(np.abs(n_f), 1e-30)
+        rel_diff = abs_diff / denom
+        metrics[field] = {
+            "max_abs": float(abs_diff.max()),
+            "mean_abs": float(abs_diff.mean()),
+            "max_rel": float(rel_diff.max()),
+            "n_finite": int(len(n_f)),
+            "n_total": int(n),
+            "native_min": float(n_f.min()),
+            "native_max": float(n_f.max()),
+            "taichi_min": float(t_f.min()),
+            "taichi_max": float(t_f.max()),
+        }
+        m = metrics[field]
+        print(f"    {field}: max_abs={m['max_abs']:.6e} mean_abs={m['mean_abs']:.6e} "
+              f"max_rel={m['max_rel']:.6e} finite={m['n_finite']}/{m['n_total']}")
 
-    # Compare
-    finite_mask = np.isfinite(nH) & np.isfinite(tH)
-    nH_f = nH[finite_mask]
-    tH_f = tH[finite_mask]
-    if len(nH_f) == 0:
-        print("  ALL NaN/Inf — skip")
+    if not metrics:
         return None
 
-    abs_diff = np.abs(nH_f - tH_f)
-    max_abs = abs_diff.max()
-    mean_abs = abs_diff.mean()
-    denom = np.maximum(np.abs(nH_f), 1e-30)
-    rel_diff = abs_diff / denom
-    max_rel = rel_diff.max()
+    print("  Flux diagnostics:")
+    for field in ("F0", "F1", "F2", "F3"):
+        n_arr = native[field]
+        t_arr = taichi[field]
+        n = min(len(n_arr), len(t_arr))
+        n_arr, t_arr = n_arr[:n], t_arr[:n]
+        finite_mask = np.isfinite(n_arr) & np.isfinite(t_arr)
+        if not finite_mask.any():
+            print(f"    {field}: ALL NaN/Inf — skip")
+            continue
+        abs_diff = np.abs(n_arr[finite_mask] - t_arr[finite_mask])
+        print(f"    {field}: max_abs={abs_diff.max():.6e} mean_abs={abs_diff.mean():.6e}")
 
-    print(f"  H field comparison ({len(nH_f)}/{n} finite cells):")
-    print(f"    max abs diff:  {max_abs:.6e}")
-    print(f"    mean abs diff: {mean_abs:.6e}")
-    print(f"    max rel diff:  {max_rel:.6e}")
-    print(f"    Native range:  [{nH_f.min():.6f}, {nH_f.max():.6f}]")
-    print(f"    Taichi range:  [{tH_f.min():.6f}, {tH_f.max():.6f}]")
+    max_abs = max(m["max_abs"] for m in metrics.values())
+    max_rel = max(m["max_rel"] for m in metrics.values())
 
     # Tolerance based on precision and step count.
     # For hyperbolic PDEs (hydrodynamics), bit-exact match is impossible at >1 step
@@ -210,7 +272,7 @@ def compare(case, steps):
         status = "FAIL"
     print(f"    → {status} (tol={tol})")
     return {"case": case, "max_abs": float(max_abs), "max_rel": float(max_rel),
-            "status": status, "n_cells": len(nH_f)}
+            "status": status, "n_cells": metrics.get("H", next(iter(metrics.values())))["n_finite"]}
 
 
 def main():

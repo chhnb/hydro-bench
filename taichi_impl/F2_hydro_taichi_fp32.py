@@ -25,7 +25,7 @@ BRDTH: ti.f32 = 100.0
 
 
 def run(days=10, backend="cuda", mesh="default", steps=None):
-    ti.init(arch=ti.cuda if backend == "cuda" else ti.cpu, default_fp=ti.f32)
+    ti.init(arch=ti.cuda if backend == "cuda" else ti.cpu, default_fp=ti.f32, fast_math=False)
     mesh_data = load_mesh(mesh=mesh)
     mesh = mesh_data
 
@@ -35,7 +35,8 @@ def run(days=10, backend="cuda", mesh="default", steps=None):
     HM2 = float(mesh["HM2"])
     DT = float(mesh["DT"])
     steps_per_day = mesh["steps_per_day"]
-    total_steps = steps if steps is not None else steps_per_day * days
+    steps_in_day = max(steps_per_day - 1, 1)
+    total_steps = steps if steps is not None else steps_in_day * days
 
     # --- Fields: edges [4*CELL] ---
     NAC   = ti.field(ti.i32, shape=NE)
@@ -65,6 +66,8 @@ def run(days=10, backend="cuda", mesh="default", steps=None):
     NDAYS = mesh["NDAYS"]
     ZT  = ti.field(ti.f32, shape=NDAYS * CELL)
     DZT = ti.field(ti.f32, shape=NDAYS * CELL)
+    QT  = ti.field(ti.f32, shape=NDAYS * CELL)
+    DQT = ti.field(ti.f32, shape=NDAYS * CELL)
 
     # --- Load data into fields ---
     NAC.from_numpy(mesh["NAC"])
@@ -85,26 +88,118 @@ def run(days=10, backend="cuda", mesh="default", steps=None):
     FNC.from_numpy(mesh["FNC"])
     ZT.from_numpy(mesh["ZT"])
     DZT.from_numpy(mesh["DZT"])
+    QT.from_numpy(mesh["QT"])
+    DQT.from_numpy(mesh["DQT"])
 
     # ------------------------------------------------------------------
     # Taichi functions
     # ------------------------------------------------------------------
     @ti.func
-    def QF(h: ti.f32, u: ti.f32, v: ti.f32) -> ti.types.vector(4, ti.f32):
-        hu = h * u
-        return ti.Vector([hu, hu * u, hu * v, HALF_G * h * h])
+    def f64_ratio(num: ti.template(), den: ti.template()) -> ti.f64:
+        return ti.cast(num, ti.f64) / ti.cast(den, ti.f64)
+
+    @ti.func
+    def half_g_h2_f32(h: ti.f32) -> ti.f32:
+        return ti.cast(f64_ratio(4905, 1000) * ti.cast(h, ti.f64) * ti.cast(h, ti.f64), ti.f32)
+
+    @ti.func
+    def sqrt_g_h_f32(h: ti.f32) -> ti.f32:
+        return ti.sqrt(ti.cast(f64_ratio(981, 100) * ti.cast(h, ti.f64), ti.f32))
+
+    @ti.func
+    def div_9_81_f32(x: ti.f32) -> ti.f32:
+        return ti.cast(ti.cast(x, ti.f64) / f64_ratio(981, 100), ti.f32)
+
+    @ti.func
+    def div_39_24_f32(x: ti.f32) -> ti.f32:
+        return ti.cast(ti.cast(x, ti.f64) / f64_ratio(3924, 100), ti.f32)
+
+    @ti.func
+    def sqrt_div_4_905_f32(x: ti.f32) -> ti.f32:
+        return ti.sqrt(ti.cast(ti.cast(x, ti.f64) / f64_ratio(4905, 1000), ti.f32))
+
+    @ti.func
+    def sqrt_mul_6_264_f32(h: ti.f32) -> ti.f32:
+        return ti.cast(f64_ratio(6264, 1000) * ti.cast(ti.sqrt(h), ti.f64), ti.f32)
+
+    @ti.func
+    def div_313_92_f32(x: ti.f32) -> ti.f32:
+        return ti.cast(ti.cast(x, ti.f64) / f64_ratio(31392, 100), ti.f32)
+
+    @ti.func
+    def rn_f32(x: ti.f32) -> ti.f32:
+        return ti.bit_cast(ti.bit_cast(x, ti.i32), ti.f32)
+
+    @ti.func
+    def qf_accum(fl0: ti.f32, fl1: ti.f32, fl2: ti.f32, fl3: ti.f32,
+                 sign: ti.template(), h: ti.f32, u: ti.f32, v: ti.f32) -> ti.types.vector(4, ti.f32):
+        q0 = h * u
+        q1 = q0 * u
+        q2 = q0 * v
+        q3 = half_g_h2_f32(h)
+        s = ti.cast(sign, ti.f32)
+        fl0 = fl0 + q0 * s
+        fl1 = fl1 + q1 * s
+        fl2 = fl2 + q2 * s
+        fl3 = fl3 + q3 * s
+        return ti.Vector([fl0, fl1, fl2, fl3])
+
+    @ti.func
+    def qs_accum(kind: ti.template(), sign: ti.template(),
+                 QL: ti.types.vector(3, ti.f32), QR: ti.types.vector(3, ti.f32),
+                 fil: ti.f32, fir: ti.f32,
+                 fl0: ti.f32, fl1: ti.f32, fl2: ti.f32, fl3: ti.f32) -> ti.types.vector(6, ti.f32):
+        h = ti.cast(0.0, ti.f32)
+        u = ti.cast(0.0, ti.f32)
+        v = ti.cast(0.0, ti.f32)
+        if ti.static(kind == 1):
+            h = QL[0]
+            u = QL[1]
+            v = QL[2]
+        elif ti.static(kind == 2):
+            u = fil / 3.0
+            h = div_9_81_f32(u * u)
+            v = QL[2]
+        elif ti.static(kind == 3):
+            u = (fil + fir) / 2.0
+            fil = fil - u
+            h = div_39_24_f32(fil * fil)
+            v = QL[2]
+        elif ti.static(kind == 5):
+            u = (fil + fir) / 2.0
+            fir = fir - u
+            h = div_39_24_f32(fir * fir)
+            v = QR[2]
+        elif ti.static(kind == 6):
+            u = fir / 3.0
+            h = div_9_81_f32(u * u)
+            v = QR[2]
+        else:
+            h = QR[0]
+            u = QR[1]
+            v = QR[2]
+
+        flr = qf_accum(fl0, fl1, fl2, fl3, sign, h, u, v)
+        return ti.Vector([fil, fir, flr[0], flr[1], flr[2], flr[3]])
+
+    @ti.func
+    def native_mul_pow_f32(c: ti.f32, x: ti.f32, p: ti.f64) -> ti.f32:
+        return ti.cast(ti.cast(c, ti.f64) * ti.pow(ti.cast(x, ti.f64), p), ti.f32)
 
     @ti.func
     def osher(QL: ti.types.vector(3, ti.f32),
               QR: ti.types.vector(3, ti.f32),
               FIL_in: ti.f32, H_pos: ti.f32) -> ti.types.vector(4, ti.f32):
-        CR = ti.sqrt(G * QR[0])
+        CR = sqrt_g_h_f32(QR[0])
         FIR_v = QR[1] - 2.0 * CR
         UA = (FIL_in + FIR_v) / 2.0
         CA = ti.abs((FIL_in - FIR_v) / 4.0)
-        CL_v = ti.sqrt(G * H_pos)
+        CL_v = sqrt_g_h_f32(H_pos)
 
-        FLR = ti.Vector([0.0, 0.0, 0.0, 0.0])
+        fl0 = ti.cast(0.0, ti.f32)
+        fl1 = ti.cast(0.0, ti.f32)
+        fl2 = ti.cast(0.0, ti.f32)
+        fl3 = ti.cast(0.0, ti.f32)
         K2 = 0
         if CA < UA:
             K2 = 1
@@ -130,89 +225,105 @@ def run(days=10, backend="cuda", mesh="default", steps=None):
 
         if K1 == 1:
             if K2 == 1:
-                US = fil / 3.0; HS = US * US / G
-                FLR += QF(HS, US, QL[2])
+                state = qs_accum(2, 1, QL, QR, fil, fir, fl0, fl1, fl2, fl3)
+                fil = state[0]; fir = state[1]; fl0 = state[2]; fl1 = state[3]; fl2 = state[4]; fl3 = state[5]
             elif K2 == 2:
-                ua_ = (fil + fir) / 2.0; fil = fil - ua_; HA = fil * fil / (4.0 * G)
-                FLR += QF(HA, ua_, QL[2])
+                state = qs_accum(3, 1, QL, QR, fil, fir, fl0, fl1, fl2, fl3)
+                fil = state[0]; fir = state[1]; fl0 = state[2]; fl1 = state[3]; fl2 = state[4]; fl3 = state[5]
             elif K2 == 3:
-                ua_ = (fil + fir) / 2.0; fir = fir - ua_; HA = fir * fir / (4.0 * G)
-                FLR += QF(HA, ua_, QR[2])
+                state = qs_accum(5, 1, QL, QR, fil, fir, fl0, fl1, fl2, fl3)
+                fil = state[0]; fir = state[1]; fl0 = state[2]; fl1 = state[3]; fl2 = state[4]; fl3 = state[5]
             else:
-                US = fir / 3.0; HS = US * US / G
-                FLR += QF(HS, US, QR[2])
+                state = qs_accum(6, 1, QL, QR, fil, fir, fl0, fl1, fl2, fl3)
+                fil = state[0]; fir = state[1]; fl0 = state[2]; fl1 = state[3]; fl2 = state[4]; fl3 = state[5]
         elif K1 == 2:
             if K2 == 1:
-                FLR += QF(QL[0], QL[1], QL[2])
+                state = qs_accum(1, 1, QL, QR, fil, fir, fl0, fl1, fl2, fl3)
+                fil = state[0]; fir = state[1]; fl0 = state[2]; fl1 = state[3]; fl2 = state[4]; fl3 = state[5]
             elif K2 == 2:
-                FLR += QF(QL[0], QL[1], QL[2])
-                US2 = fil / 3.0; HS2 = US2 * US2 / G
-                FLR -= QF(HS2, US2, QL[2])
-                ua_ = (fil + fir) / 2.0; fil = fil - ua_; HA = fil * fil / (4.0 * G)
-                FLR += QF(HA, ua_, QL[2])
+                state = qs_accum(1, 1, QL, QR, fil, fir, fl0, fl1, fl2, fl3)
+                fil = state[0]; fir = state[1]; fl0 = state[2]; fl1 = state[3]; fl2 = state[4]; fl3 = state[5]
+                state = qs_accum(2, -1, QL, QR, fil, fir, fl0, fl1, fl2, fl3)
+                fil = state[0]; fir = state[1]; fl0 = state[2]; fl1 = state[3]; fl2 = state[4]; fl3 = state[5]
+                state = qs_accum(3, 1, QL, QR, fil, fir, fl0, fl1, fl2, fl3)
+                fil = state[0]; fir = state[1]; fl0 = state[2]; fl1 = state[3]; fl2 = state[4]; fl3 = state[5]
             elif K2 == 3:
-                FLR += QF(QL[0], QL[1], QL[2])
-                US2 = fil / 3.0; HS2 = US2 * US2 / G
-                FLR -= QF(HS2, US2, QL[2])
-                ua_ = (fil + fir) / 2.0; fir = fir - ua_; HA = fir * fir / (4.0 * G)
-                FLR += QF(HA, ua_, QR[2])
+                state = qs_accum(1, 1, QL, QR, fil, fir, fl0, fl1, fl2, fl3)
+                fil = state[0]; fir = state[1]; fl0 = state[2]; fl1 = state[3]; fl2 = state[4]; fl3 = state[5]
+                state = qs_accum(2, -1, QL, QR, fil, fir, fl0, fl1, fl2, fl3)
+                fil = state[0]; fir = state[1]; fl0 = state[2]; fl1 = state[3]; fl2 = state[4]; fl3 = state[5]
+                state = qs_accum(5, 1, QL, QR, fil, fir, fl0, fl1, fl2, fl3)
+                fil = state[0]; fir = state[1]; fl0 = state[2]; fl1 = state[3]; fl2 = state[4]; fl3 = state[5]
             else:
-                FLR += QF(QL[0], QL[1], QL[2])
-                US2 = fil / 3.0; HS2 = US2 * US2 / G
-                FLR -= QF(HS2, US2, QL[2])
-                US6 = fir / 3.0; HS6 = US6 * US6 / G
-                FLR += QF(HS6, US6, QR[2])
+                state = qs_accum(1, 1, QL, QR, fil, fir, fl0, fl1, fl2, fl3)
+                fil = state[0]; fir = state[1]; fl0 = state[2]; fl1 = state[3]; fl2 = state[4]; fl3 = state[5]
+                state = qs_accum(2, -1, QL, QR, fil, fir, fl0, fl1, fl2, fl3)
+                fil = state[0]; fir = state[1]; fl0 = state[2]; fl1 = state[3]; fl2 = state[4]; fl3 = state[5]
+                state = qs_accum(6, 1, QL, QR, fil, fir, fl0, fl1, fl2, fl3)
+                fil = state[0]; fir = state[1]; fl0 = state[2]; fl1 = state[3]; fl2 = state[4]; fl3 = state[5]
         elif K1 == 3:
             if K2 == 1:
-                US2 = fil / 3.0; HS2 = US2 * US2 / G
-                FLR += QF(HS2, US2, QL[2])
-                US6 = fir / 3.0; HS6 = US6 * US6 / G
-                FLR -= QF(HS6, US6, QR[2])
-                FLR += QF(QR[0], QR[1], QR[2])
+                state = qs_accum(2, 1, QL, QR, fil, fir, fl0, fl1, fl2, fl3)
+                fil = state[0]; fir = state[1]; fl0 = state[2]; fl1 = state[3]; fl2 = state[4]; fl3 = state[5]
+                state = qs_accum(6, -1, QL, QR, fil, fir, fl0, fl1, fl2, fl3)
+                fil = state[0]; fir = state[1]; fl0 = state[2]; fl1 = state[3]; fl2 = state[4]; fl3 = state[5]
+                state = qs_accum(7, 1, QL, QR, fil, fir, fl0, fl1, fl2, fl3)
+                fil = state[0]; fir = state[1]; fl0 = state[2]; fl1 = state[3]; fl2 = state[4]; fl3 = state[5]
             elif K2 == 2:
-                ua_ = (fil + fir) / 2.0; fil = fil - ua_; HA = fil * fil / (4.0 * G)
-                FLR += QF(HA, ua_, QL[2])
-                US6 = fir / 3.0; HS6 = US6 * US6 / G
-                FLR -= QF(HS6, US6, QR[2])
-                FLR += QF(QR[0], QR[1], QR[2])
+                state = qs_accum(3, 1, QL, QR, fil, fir, fl0, fl1, fl2, fl3)
+                fil = state[0]; fir = state[1]; fl0 = state[2]; fl1 = state[3]; fl2 = state[4]; fl3 = state[5]
+                state = qs_accum(6, -1, QL, QR, fil, fir, fl0, fl1, fl2, fl3)
+                fil = state[0]; fir = state[1]; fl0 = state[2]; fl1 = state[3]; fl2 = state[4]; fl3 = state[5]
+                state = qs_accum(7, 1, QL, QR, fil, fir, fl0, fl1, fl2, fl3)
+                fil = state[0]; fir = state[1]; fl0 = state[2]; fl1 = state[3]; fl2 = state[4]; fl3 = state[5]
             elif K2 == 3:
-                ua_ = (fil + fir) / 2.0; fir = fir - ua_; HA = fir * fir / (4.0 * G)
-                FLR += QF(HA, ua_, QR[2])
-                US6b = fir / 3.0; HS6b = US6b * US6b / G
-                FLR -= QF(HS6b, US6b, QR[2])
-                FLR += QF(QR[0], QR[1], QR[2])
+                state = qs_accum(5, 1, QL, QR, fil, fir, fl0, fl1, fl2, fl3)
+                fil = state[0]; fir = state[1]; fl0 = state[2]; fl1 = state[3]; fl2 = state[4]; fl3 = state[5]
+                state = qs_accum(6, -1, QL, QR, fil, fir, fl0, fl1, fl2, fl3)
+                fil = state[0]; fir = state[1]; fl0 = state[2]; fl1 = state[3]; fl2 = state[4]; fl3 = state[5]
+                state = qs_accum(7, 1, QL, QR, fil, fir, fl0, fl1, fl2, fl3)
+                fil = state[0]; fir = state[1]; fl0 = state[2]; fl1 = state[3]; fl2 = state[4]; fl3 = state[5]
             else:
-                FLR += QF(QR[0], QR[1], QR[2])
+                state = qs_accum(7, 1, QL, QR, fil, fir, fl0, fl1, fl2, fl3)
+                fil = state[0]; fir = state[1]; fl0 = state[2]; fl1 = state[3]; fl2 = state[4]; fl3 = state[5]
         else:  # K1 == 4
             if K2 == 1:
-                FLR += QF(QL[0], QL[1], QL[2])
-                US6 = fir / 3.0; HS6 = US6 * US6 / G
-                FLR -= QF(HS6, US6, QR[2])
-                FLR += QF(QR[0], QR[1], QR[2])
+                state = qs_accum(1, 1, QL, QR, fil, fir, fl0, fl1, fl2, fl3)
+                fil = state[0]; fir = state[1]; fl0 = state[2]; fl1 = state[3]; fl2 = state[4]; fl3 = state[5]
+                state = qs_accum(6, -1, QL, QR, fil, fir, fl0, fl1, fl2, fl3)
+                fil = state[0]; fir = state[1]; fl0 = state[2]; fl1 = state[3]; fl2 = state[4]; fl3 = state[5]
+                state = qs_accum(7, 1, QL, QR, fil, fir, fl0, fl1, fl2, fl3)
+                fil = state[0]; fir = state[1]; fl0 = state[2]; fl1 = state[3]; fl2 = state[4]; fl3 = state[5]
             elif K2 == 2:
-                FLR += QF(QL[0], QL[1], QL[2])
-                US2 = fil / 3.0; HS2 = US2 * US2 / G
-                FLR -= QF(HS2, US2, QL[2])
-                ua_ = (fil + fir) / 2.0; fil = fil - ua_; HA = fil * fil / (4.0 * G)
-                FLR += QF(HA, ua_, QL[2])
-                US6 = fir / 3.0; HS6 = US6 * US6 / G
-                FLR -= QF(HS6, US6, QR[2])
-                FLR += QF(QR[0], QR[1], QR[2])
+                state = qs_accum(1, 1, QL, QR, fil, fir, fl0, fl1, fl2, fl3)
+                fil = state[0]; fir = state[1]; fl0 = state[2]; fl1 = state[3]; fl2 = state[4]; fl3 = state[5]
+                state = qs_accum(2, -1, QL, QR, fil, fir, fl0, fl1, fl2, fl3)
+                fil = state[0]; fir = state[1]; fl0 = state[2]; fl1 = state[3]; fl2 = state[4]; fl3 = state[5]
+                state = qs_accum(3, 1, QL, QR, fil, fir, fl0, fl1, fl2, fl3)
+                fil = state[0]; fir = state[1]; fl0 = state[2]; fl1 = state[3]; fl2 = state[4]; fl3 = state[5]
+                state = qs_accum(6, -1, QL, QR, fil, fir, fl0, fl1, fl2, fl3)
+                fil = state[0]; fir = state[1]; fl0 = state[2]; fl1 = state[3]; fl2 = state[4]; fl3 = state[5]
+                state = qs_accum(7, 1, QL, QR, fil, fir, fl0, fl1, fl2, fl3)
+                fil = state[0]; fir = state[1]; fl0 = state[2]; fl1 = state[3]; fl2 = state[4]; fl3 = state[5]
             elif K2 == 3:
-                FLR += QF(QL[0], QL[1], QL[2])
-                US2 = fil / 3.0; HS2 = US2 * US2 / G
-                FLR -= QF(HS2, US2, QL[2])
-                ua_ = (fil + fir) / 2.0; fir = fir - ua_; HA = fir * fir / (4.0 * G)
-                FLR += QF(HA, ua_, QR[2])
-                US6 = fir / 3.0; HS6 = US6 * US6 / G
-                FLR -= QF(HS6, US6, QR[2])
-                FLR += QF(QR[0], QR[1], QR[2])
+                state = qs_accum(1, 1, QL, QR, fil, fir, fl0, fl1, fl2, fl3)
+                fil = state[0]; fir = state[1]; fl0 = state[2]; fl1 = state[3]; fl2 = state[4]; fl3 = state[5]
+                state = qs_accum(2, -1, QL, QR, fil, fir, fl0, fl1, fl2, fl3)
+                fil = state[0]; fir = state[1]; fl0 = state[2]; fl1 = state[3]; fl2 = state[4]; fl3 = state[5]
+                state = qs_accum(5, 1, QL, QR, fil, fir, fl0, fl1, fl2, fl3)
+                fil = state[0]; fir = state[1]; fl0 = state[2]; fl1 = state[3]; fl2 = state[4]; fl3 = state[5]
+                state = qs_accum(6, -1, QL, QR, fil, fir, fl0, fl1, fl2, fl3)
+                fil = state[0]; fir = state[1]; fl0 = state[2]; fl1 = state[3]; fl2 = state[4]; fl3 = state[5]
+                state = qs_accum(7, 1, QL, QR, fil, fir, fl0, fl1, fl2, fl3)
+                fil = state[0]; fir = state[1]; fl0 = state[2]; fl1 = state[3]; fl2 = state[4]; fl3 = state[5]
             else:
-                FLR += QF(QL[0], QL[1], QL[2])
-                US2 = fil / 3.0; HS2 = US2 * US2 / G
-                FLR -= QF(HS2, US2, QL[2])
-                FLR += QF(QR[0], QR[1], QR[2])
-        return FLR
+                state = qs_accum(1, 1, QL, QR, fil, fir, fl0, fl1, fl2, fl3)
+                fil = state[0]; fir = state[1]; fl0 = state[2]; fl1 = state[3]; fl2 = state[4]; fl3 = state[5]
+                state = qs_accum(2, -1, QL, QR, fil, fir, fl0, fl1, fl2, fl3)
+                fil = state[0]; fir = state[1]; fl0 = state[2]; fl1 = state[3]; fl2 = state[4]; fl3 = state[5]
+                state = qs_accum(7, 1, QL, QR, fil, fir, fl0, fl1, fl2, fl3)
+                fil = state[0]; fir = state[1]; fl0 = state[2]; fl1 = state[3]; fl2 = state[4]; fl3 = state[5]
+        return ti.Vector([fl0, fl1, fl2, fl3])
 
     @ti.func
     def bounda_klas1(H_pre: ti.f32, QL_u: ti.f32, QL_v: ti.f32,
@@ -220,19 +331,20 @@ def run(days=10, backend="cuda", mesh="default", steps=None):
         """CalculateKlas1: water level boundary (iterative Riemann solver)."""
         HB1 = ZT[jt * CELL + pos] + DZT[jt * CELL + pos] * ti.cast(jt, ti.f32) - ZBC[pos]
         HB1 = ti.max(HB1, HM2)
-        FIAL = QL_u + 6.264 * ti.sqrt(H_pre)
+        FIAL = ti.cast(ti.cast(QL_u, ti.f64) + ti.cast(sqrt_mul_6_264_f32(H_pre), ti.f64), ti.f32)
         UR0 = QL_u
         URB = UR0
         for _ in range(30):
-            FIAR = URB - 6.264 * ti.sqrt(HB1)
-            URB = (FIAL + FIAR) * (FIAL - FIAR) * (FIAL - FIAR) / HB1 / 313.92
+            FIAR = ti.cast(ti.cast(URB, ti.f64) - ti.cast(sqrt_mul_6_264_f32(HB1), ti.f64), ti.f32)
+            urb_num = (FIAL + FIAR) * (FIAL - FIAR) * (FIAL - FIAR) / HB1
+            URB = div_313_92_f32(urb_num)
             if ti.abs(URB - UR0) <= 0.0001:
                 break
             UR0 = URB
         f0 = HB1 * URB
         f1 = f0 * URB
         f2 = ti.cast(0.0, ti.f32)
-        f3 = HALF_G * HB1 * HB1
+        f3 = half_g_h2_f32(HB1)
         return ti.Vector([f0, f1, f2, f3])
 
     # ------------------------------------------------------------------
@@ -256,7 +368,7 @@ def run(days=10, backend="cuda", mesh="default", steps=None):
             SINJ = SINF[idx]
 
             QL = ti.Vector([H1, U1 * COSJ + V1 * SINJ, V1 * COSJ - U1 * SINJ])
-            CL_v = ti.sqrt(G * H1)
+            CL_v = sqrt_g_h_f32(H1)
             FIL_v = QL[1] + 2.0 * CL_v
 
             f0 = ti.cast(0.0, ti.f32)
@@ -266,13 +378,13 @@ def run(days=10, backend="cuda", mesh="default", steps=None):
 
             if (KP >= 1 and KP <= 8) or KP >= 10:
                 # BOUNDA dispatch
-                CL_b = ti.sqrt(G * H1)
+                CL_b = sqrt_g_h_f32(H1)
                 if QL[1] > CL_b and H1 < HM2:
                     # Supercritical outflow
                     f0 = H1 * QL[1]
                     f1 = f0 * QL[1]
                     f2 = f0 * QL[2]
-                    f3 = HALF_G * H1 * H1
+                    f3 = half_g_h2_f32(H1)
                 else:
                     f2_b = ti.cast(0.0, ti.f32)
                     if QL[1] > 0.0:
@@ -285,14 +397,35 @@ def run(days=10, backend="cuda", mesh="default", steps=None):
                         f3 = result[3]
                     elif KP == 4:
                         f0 = 0.0; f1 = 0.0; f2 = 0.0
-                        f3 = HALF_G * H1 * H1
+                        f3 = half_g_h2_f32(H1)
+                    elif KP == 10:
+                        # CalculateKlas10: iterative HB convergence with QT/DQT.
+                        SIDE_e = SIDE[idx]
+                        FIL_v = QL[1] + 2.0 * sqrt_g_h_f32(H1)
+                        flux0_kl10 = -(QT[jt * CELL + cell_i] + DQT[jt * CELL + cell_i] * ti.cast(kt, ti.f32)) / SIDE_e
+                        QB2 = flux0_kl10 * flux0_kl10
+                        HB0 = H1
+                        HB = ti.cast(0.0, ti.f32)
+                        converged_k10 = False
+                        for _ in range(20):
+                            if not converged_k10:
+                                W_temp = FIL_v - flux0_kl10 / HB0
+                                HB = div_39_24_f32(W_temp * W_temp)
+                                if ti.abs(HB0 - HB) <= 0.005:
+                                    converged_k10 = True
+                                else:
+                                    HB0 = HB0 * 0.5 + HB * 0.5
+                        f0 = flux0_kl10
+                        f1 = ti.select(HB <= 1.0, ti.cast(0.0, ti.f32), QB2 / HB)
+                        f2 = 0.0
+                        f3 = half_g_h2_f32(HB)
                     else:
                         # Other boundary types — treat as wall
                         f0 = 0.0; f1 = 0.0; f2 = 0.0
-                        f3 = HALF_G * H1 * H1
+                        f3 = half_g_h2_f32(H1)
             elif NC < 0:
                 # No neighbor (shouldn't happen for KP==0, but safety)
-                f3 = HALF_G * H1 * H1
+                f3 = half_g_h2_f32(H1)
             else:
                 # Interior edge (KP == 0)
                 HC = ti.max(H[NC], HM1)
@@ -304,11 +437,11 @@ def run(days=10, backend="cuda", mesh="default", steps=None):
                 if H1 <= HM1 and HC <= HM1:
                     pass  # both dry
                 elif ZI <= BC:
-                    f0 = -C1 * ti.pow(HC, ti.cast(1.5, ti.f32))
+                    f0 = -native_mul_pow_f32(C1, HC, 1.5)
                     f1 = H1 * QL[1] * ti.abs(QL[1])
-                    f3 = HALF_G * H1 * H1
+                    f3 = half_g_h2_f32(H1)
                 elif ZC <= BI:
-                    f0 = C1 * ti.pow(H1, ti.cast(1.5, ti.f32))
+                    f0 = native_mul_pow_f32(C1, H1, 1.5)
                     f1 = H1 * ti.abs(QL[1]) * QL[1]
                     f2 = H1 * ti.abs(QL[1]) * QL[2]
                 elif H1 <= HM2:
@@ -318,10 +451,10 @@ def run(days=10, backend="cuda", mesh="default", steps=None):
                         f0 = DH * UN
                         f1 = f0 * UN
                         f2 = f0 * (VC * COSJ - UC * SINJ)
-                        f3 = HALF_G * H1 * H1
+                        f3 = half_g_h2_f32(H1)
                     else:
-                        f0 = C1 * ti.pow(H1, ti.cast(1.5, ti.f32))
-                        f3 = HALF_G * H1 * H1
+                        f0 = native_mul_pow_f32(C1, H1, 1.5)
+                        f3 = half_g_h2_f32(H1)
                 elif HC <= HM2:
                     if ZI > ZC:
                         DH = ti.max(ZI - BC, HM1)
@@ -330,11 +463,11 @@ def run(days=10, backend="cuda", mesh="default", steps=None):
                         f0 = DH * UN
                         f1 = f0 * UN
                         f2 = f0 * QL[2]
-                        f3 = HALF_G * HC1 * HC1
+                        f3 = half_g_h2_f32(HC1)
                     else:
-                        f0 = -C1 * ti.pow(HC, ti.cast(1.5, ti.f32))
+                        f0 = -native_mul_pow_f32(C1, HC, 1.5)
                         f1 = H1 * QL[1] * QL[1]
-                        f3 = HALF_G * H1 * H1
+                        f3 = half_g_h2_f32(H1)
                 else:
                     # Both wet — Osher Riemann solver
                     if cell_i < NC:
@@ -359,7 +492,7 @@ def run(days=10, backend="cuda", mesh="default", steps=None):
                             U[NC] * COSJ1 + V[NC] * SINJ1,
                             V[NC] * COSJ1 - U[NC] * SINJ1,
                         ])
-                        CL1 = ti.sqrt(G * H[NC])
+                        CL1 = sqrt_g_h_f32(H[NC])
                         FIL1 = QL1[1] + 2.0 * CL1
                         HC2 = ti.max(H1, HM1)
                         ZC1 = ti.max(BI, ZI)
@@ -375,9 +508,9 @@ def run(days=10, backend="cuda", mesh="default", steps=None):
                         f0 = -FLR1[0]
                         f1 = FLR1[1] + (1.0 - ratio1) * HC2 * UR1 * UR1 / 2.0
                         f2 = FLR1[2]
-                        ZA = ti.sqrt(FLR1[3] / HALF_G) + BC
+                        ZA = sqrt_div_4_905_f32(FLR1[3]) + BC
                         HC3 = ti.max(ZA - BI, ti.cast(0.0, ti.f32))
-                        f3 = HALF_G * HC3 * HC3
+                        f3 = half_g_h2_f32(HC3)
 
             FLUX0[idx] = f0
             FLUX1[idx] = f1
@@ -406,12 +539,21 @@ def run(days=10, backend="cuda", mesh="default", steps=None):
                 SLSA = SLSIN[idx]
                 FLR_1 = FLUX1[idx] + FLUX3[idx]
                 FLR_2 = FLUX2[idx]
-                WH += SL * FLUX0[idx]
-                WU += SLCA * FLR_1 - SLSA * FLR_2
-                WV += SLSA * FLR_1 + SLCA * FLR_2
+                rhs_h = SL * FLUX0[idx]
+                # Match native CUDA's non-fused multiply/subtract ordering as closely as Taichi allows.
+                t1 = SLCA * FLR_1
+                t2 = SLSA * FLR_2
+                t3 = SLSA * FLR_1
+                t4 = SLCA * FLR_2
+                rhs_u = t1 - t2
+                rhs_v = t3 + t4
+                WH = WH + rhs_h
+                WU = WU + rhs_u
+                WV = WV + rhs_v
 
             DTA = ti.cast(DT, ti.f32) / AREA[i]
-            H2 = ti.max(H1 - DTA * WH, HM1)
+            DTAH = rn_f32(DTA * WH)
+            H2 = ti.max(rn_f32(H1 - DTAH), HM1)
             Z2 = H2 + BI
 
             U2 = ti.cast(0.0, ti.f32)
@@ -429,7 +571,8 @@ def run(days=10, backend="cuda", mesh="default", steps=None):
                     QY1 = H1 * V1
                     DTAU = DTA * WU
                     DTAV = DTA * WV
-                    WSF = FNC[i] * ti.sqrt(U1 * U1 + V1 * V1) / ti.pow(H1, ti.cast(0.33333, ti.f32))
+                    WSF_num = FNC[i] * ti.sqrt(U1 * U1 + V1 * V1)
+                    WSF = ti.cast(ti.cast(WSF_num, ti.f64) / ti.pow(ti.cast(H1, ti.f64), f64_ratio(33333, 100000)), ti.f32)
                     U2 = (QX1 - DTAU - ti.cast(DT, ti.f32) * WSF * U1) / H2
                     V2 = (QY1 - DTAV - ti.cast(DT, ti.f32) * WSF * V1) / H2
                     if H2 > HM2:
@@ -451,8 +594,9 @@ def run(days=10, backend="cuda", mesh="default", steps=None):
     # ------------------------------------------------------------------
     def step_fn():
         step = 0
-        for day in range(days):
-            for kt in range(1, steps_per_day + 1):
+        day_limit = mesh["NDAYS"] if steps is not None else min(days, mesh["NDAYS"])
+        for day in range(day_limit):
+            for kt in range(1, steps_per_day):
                 if step >= total_steps:
                     return
                 calculate_flux(kt, day)
@@ -472,14 +616,19 @@ def run(days=10, backend="cuda", mesh="default", steps=None):
     V.from_numpy(mesh["V"])
     Z.from_numpy(mesh["Z"])
     W.from_numpy(mesh["W"])
+    FLUX0.fill(0)
+    FLUX1.fill(0)
+    FLUX2.fill(0)
+    FLUX3.fill(0)
 
-    return step_fn, sync_fn, H
+    return step_fn, sync_fn, H, U, V, Z, FLUX0, FLUX1, FLUX2, FLUX3
 
 
 if __name__ == "__main__":
     import time
     days = 10
-    step_fn, sync_fn, H_field = run(days=days, backend="cuda")
+    result = run(days=days, backend="cuda")
+    step_fn, sync_fn, H_field = result[:3]
     sync_fn()
     t0 = time.perf_counter()
     step_fn()

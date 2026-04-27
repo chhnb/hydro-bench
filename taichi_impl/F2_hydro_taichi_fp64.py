@@ -27,7 +27,7 @@ BRDTH: ti.f64 = 100.0
 
 
 def run(days=10, backend="cuda", mesh="default", steps=None):
-    ti.init(arch=ti.cuda if backend == "cuda" else ti.cpu, default_fp=ti.f64)
+    ti.init(arch=ti.cuda if backend == "cuda" else ti.cpu, default_fp=ti.f64, fast_math=False)
     mesh_data = load_mesh(mesh=mesh, dtype=np.float64)
     mesh = mesh_data
 
@@ -37,7 +37,8 @@ def run(days=10, backend="cuda", mesh="default", steps=None):
     HM2 = float(mesh["HM2"])
     DT = float(mesh["DT"])
     steps_per_day = mesh["steps_per_day"]
-    total_steps = steps if steps is not None else steps_per_day * days
+    steps_in_day = max(steps_per_day - 1, 1)
+    total_steps = steps if steps is not None else steps_in_day * days
 
     # --- Fields: edges [4*CELL] ---
     NAC   = ti.field(ti.i32, shape=NE)
@@ -67,6 +68,8 @@ def run(days=10, backend="cuda", mesh="default", steps=None):
     NDAYS = mesh["NDAYS"]
     ZT  = ti.field(ti.f64, shape=NDAYS * CELL)
     DZT = ti.field(ti.f64, shape=NDAYS * CELL)
+    QT  = ti.field(ti.f64, shape=NDAYS * CELL)
+    DQT = ti.field(ti.f64, shape=NDAYS * CELL)
 
     # --- Load data into fields ---
     NAC.from_numpy(mesh["NAC"])
@@ -87,6 +90,8 @@ def run(days=10, backend="cuda", mesh="default", steps=None):
     FNC.from_numpy(mesh["FNC"])
     ZT.from_numpy(mesh["ZT"])
     DZT.from_numpy(mesh["DZT"])
+    QT.from_numpy(mesh["QT"])
+    DQT.from_numpy(mesh["DQT"])
 
     # ------------------------------------------------------------------
     # Taichi functions
@@ -288,6 +293,27 @@ def run(days=10, backend="cuda", mesh="default", steps=None):
                     elif KP == 4:
                         f0 = 0.0; f1 = 0.0; f2 = 0.0
                         f3 = HALF_G * H1 * H1
+                    elif KP == 10:
+                        # CalculateKlas10: iterative HB convergence with QT/DQT.
+                        SIDE_e = SIDE[idx]
+                        FIL_v = QL[1] + 2.0 * ti.sqrt(G * H1)
+                        flux0_kl10 = -(QT[jt * CELL + cell_i] + DQT[jt * CELL + cell_i] * ti.cast(kt, ti.f64)) / SIDE_e
+                        QB2 = flux0_kl10 * flux0_kl10
+                        HB0 = H1
+                        HB = ti.cast(0.0, ti.f64)
+                        converged_k10 = False
+                        for _ in range(20):
+                            if not converged_k10:
+                                W_temp = FIL_v - flux0_kl10 / HB0
+                                HB = W_temp * W_temp / 39.24
+                                if ti.abs(HB0 - HB) <= 0.005:
+                                    converged_k10 = True
+                                else:
+                                    HB0 = HB0 * 0.5 + HB * 0.5
+                        f0 = flux0_kl10
+                        f1 = ti.select(HB <= 1.0, ti.cast(0.0, ti.f64), QB2 / HB)
+                        f2 = 0.0
+                        f3 = HALF_G * HB * HB
                     else:
                         # Other boundary types — treat as wall
                         f0 = 0.0; f1 = 0.0; f2 = 0.0
@@ -409,8 +435,13 @@ def run(days=10, backend="cuda", mesh="default", steps=None):
                 FLR_1 = FLUX1[idx] + FLUX3[idx]
                 FLR_2 = FLUX2[idx]
                 WH += SL * FLUX0[idx]
-                WU += SLCA * FLR_1 - SLSA * FLR_2
-                WV += SLSA * FLR_1 + SLCA * FLR_2
+                # Match native CUDA's non-fused multiply/subtract ordering.
+                t1 = SLCA * FLR_1
+                t2 = SLSA * FLR_2
+                t3 = SLSA * FLR_1
+                t4 = SLCA * FLR_2
+                WU += t1 - t2
+                WV += t3 + t4
 
             DTA = ti.cast(DT, ti.f64) / AREA[i]
             H2 = ti.max(H1 - DTA * WH, HM1)
@@ -453,8 +484,9 @@ def run(days=10, backend="cuda", mesh="default", steps=None):
     # ------------------------------------------------------------------
     def step_fn():
         step = 0
-        for day in range(days):
-            for kt in range(1, steps_per_day + 1):
+        day_limit = mesh["NDAYS"] if steps is not None else min(days, mesh["NDAYS"])
+        for day in range(day_limit):
+            for kt in range(1, steps_per_day):
                 if step >= total_steps:
                     return
                 calculate_flux(kt, day)
@@ -474,14 +506,19 @@ def run(days=10, backend="cuda", mesh="default", steps=None):
     V.from_numpy(mesh["V"])
     Z.from_numpy(mesh["Z"])
     W.from_numpy(mesh["W"])
+    FLUX0.fill(0)
+    FLUX1.fill(0)
+    FLUX2.fill(0)
+    FLUX3.fill(0)
 
-    return step_fn, sync_fn, H
+    return step_fn, sync_fn, H, U, V, Z, FLUX0, FLUX1, FLUX2, FLUX3
 
 
 if __name__ == "__main__":
     import time
     days = 10
-    step_fn, sync_fn, H_field = run(days=days, backend="cuda")
+    result = run(days=days, backend="cuda")
+    step_fn, sync_fn, H_field = result[:3]
     sync_fn()
     t0 = time.perf_counter()
     step_fn()

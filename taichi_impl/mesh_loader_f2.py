@@ -217,7 +217,19 @@ def load_mesh(mesh="default", dtype=np.float32):
     SLSIN = SIDE * SINF
     ZB1 = ZBC + HM1
     FNC = (9.81 * CV * CV).astype(dtype)
-    H = np.maximum(Z_init - ZBC, HM1).astype(dtype)
+
+    # Native mesh.cpp only clamps dry cells:
+    #   if Z <= ZBC: H = HM1 and Z = ZBC + HM1
+    #   else:        H = Z - ZBC
+    # Shallow wet cells with 0 < H < HM1 must not be clamped here; the
+    # update kernel applies HM1 after the first timestep.
+    Z = Z_init.copy()
+    H = Z - ZBC
+    dry_mask = Z <= ZBC
+    H[dry_mask] = HM1
+    Z[dry_mask] = ZB1[dry_mask]
+    ghost_mask = NAP[1, 1:CELL + 1] == 0
+    H[ghost_mask] = 0.0
     W = np.sqrt(U_init ** 2 + V_init ** 2).astype(dtype)
 
     # FLUX buffers (output, initialized to 0)
@@ -293,6 +305,63 @@ def load_mesh(mesh="default", dtype=np.float32):
     lines_mbq = rd("MBQ.DAT")
     NQ_actual = int(lines_mbq[0]) if lines_mbq else 0
 
+    # Load NQ flow-rate timeseries: same logic as ZT/NZ above.
+    if NQ > 0:
+        MBQ_cells = []
+        for line in lines_mbq:
+            parts = line.split()
+            if len(parts) >= 3:
+                try:
+                    cell_id = int(parts[1])
+                    group_id = int(parts[2])
+                    MBQ_cells.append((cell_id - 1, group_id))
+                except ValueError:
+                    continue
+        bounde_nq = os.path.join(data_dir, "BOUNDE", "NQ")
+        nq_data = {}
+        group_count_q = {}
+        for _, gid in MBQ_cells:
+            group_count_q[gid] = group_count_q.get(gid, 0) + 1
+        if os.path.isdir(bounde_nq):
+            for fn in os.listdir(bounde_nq):
+                if not (fn.startswith("NQ") and fn.endswith(".DAT")):
+                    continue
+                try:
+                    gid = int(fn[2:6])
+                except ValueError:
+                    continue
+                qs = []
+                with open(os.path.join(bounde_nq, fn), 'r', encoding='latin-1') as f:
+                    first = True
+                    for line in f:
+                        s = line.strip()
+                        if not s:
+                            continue
+                        parts = s.split()
+                        if first and len(parts) == 1:
+                            first = False
+                            continue
+                        first = False
+                        if len(parts) >= 2:
+                            try:
+                                # Native stores BOUNDRYinterp output in a float
+                                # temporary even when Real is double.
+                                qs.append(float(np.float32(float(parts[1]))))
+                            except ValueError:
+                                continue
+                if qs:
+                    nq_data[gid] = qs
+        for cell_0idx, group_id in MBQ_cells:
+            if group_id in nq_data:
+                qs = nq_data[group_id]
+                kl = max(group_count_q.get(group_id, 1), 1)
+                for day in range(min(NDAYS, len(qs))):
+                    q_day = np.float32(np.float32(qs[day]) / np.float32(kl))
+                    QT[day * CELL + cell_0idx] = q_day
+                    if day < len(qs) - 1 and K0 > 0:
+                        q_next = np.float32(np.float32(qs[day + 1]) / np.float32(kl))
+                        DQT[day * CELL + cell_0idx] = (q_next - q_day) / K0
+
     steps_per_day = int(MDT / DT)
 
     return dict(
@@ -300,7 +369,7 @@ def load_mesh(mesh="default", dtype=np.float32):
         DT=dtype(DT), MDT=MDT, NDAYS=NDAYS, JL=dtype(JL),
         steps_per_day=steps_per_day, NQ=NQ, NZ=NZ,
         H=H, U=U_init.astype(dtype), V=V_init.astype(dtype),
-        Z=Z_init.astype(dtype), W=W,
+        Z=Z.astype(dtype), W=W,
         ZBC=ZBC, ZB1=ZB1.astype(dtype), AREA=AREA, FNC=FNC.astype(dtype),
         NAC=NAC, KLAS=KLAS, SIDE=SIDE, COSF=COSF, SINF=SINF,
         SLCOS=SLCOS.astype(dtype), SLSIN=SLSIN.astype(dtype),

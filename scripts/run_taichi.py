@@ -34,10 +34,8 @@ def main():
     # Parse case
     if case.startswith("F1"):
         if "fp64" in case:
-            ti.init(arch=ti.cuda, default_fp=ti.f64)
             from F1_hydro_taichi_2kernel_fp64 import run_real
         else:
-            ti.init(arch=ti.cuda, default_fp=ti.f32)
             from F1_hydro_taichi_2kernel_fp32 import run_real
         # mesh: "default" for 6.7K, "20w" for 207K
         mesh = "20w" if "207K" in case else "default"
@@ -49,13 +47,12 @@ def main():
             return 1
     elif case.startswith("F2"):
         if "fp64" in case:
-            ti.init(arch=ti.cuda, default_fp=ti.f64)
             from F2_hydro_taichi_fp64 import run
         else:
-            ti.init(arch=ti.cuda, default_fp=ti.f32)
             from F2_hydro_taichi_fp32 import run
         mesh = "20w" if "207K" in case else "default"
-        step_fn, sync_fn, H = run(days=1, backend="cuda", mesh=mesh, steps=steps)
+        result = run(days=1, backend="cuda", mesh=mesh, steps=steps)
+        step_fn, sync_fn, H = result[:3]
     else:
         print(f"ERROR: unknown case '{case}'")
         return 1
