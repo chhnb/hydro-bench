@@ -105,8 +105,10 @@ def load_mesh(mesh="default", dtype=np.float32):
         parts = lines[k].split()
         XP[k] = float(parts[1])
         YP[k] = float(parts[2])
-    XP[1:] -= XP[1:].min()
-    YP[1:] -= YP[1:].min()
+    XIMIN = dtype(XP[1:].min())
+    YIMIN = dtype(YP[1:].min())
+    XP[1:] -= XIMIN
+    YP[1:] -= YIMIN
 
     # ---- PNAP.DAT: cell-to-node ----
     lines = rd("PNAP.DAT")
@@ -371,10 +373,11 @@ def load_mesh(mesh="default", dtype=np.float32):
         H=H, U=U_init.astype(dtype), V=V_init.astype(dtype),
         Z=Z.astype(dtype), W=W,
         ZBC=ZBC, ZB1=ZB1.astype(dtype), AREA=AREA, FNC=FNC.astype(dtype),
-        NAC=NAC, KLAS=KLAS, SIDE=SIDE, COSF=COSF, SINF=SINF,
+        NAC=NAC, NAP=NAP, KLAS=KLAS, SIDE=SIDE, COSF=COSF, SINF=SINF,
         SLCOS=SLCOS.astype(dtype), SLSIN=SLSIN.astype(dtype),
         FLUX0=FLUX0, FLUX1=FLUX1, FLUX2=FLUX2, FLUX3=FLUX3,
         ZT=ZT, DZT=DZT, QT=QT, DQT=DQT, BoundaryFeature=BoundaryFeature,
+        XP=XP, YP=YP, XIMIN=XIMIN, YIMIN=YIMIN,
         XC=XC, YC=YC, NV=NV,
     )
 

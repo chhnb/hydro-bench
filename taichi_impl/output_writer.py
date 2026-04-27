@@ -1,33 +1,24 @@
-"""Write the native hydro-cal ``OUTPUT/*`` files from Taichi-side state.
+"""Reproduce the native CUDA ``OUTPUT/`` files from Taichi-side state.
 
-The native CUDA `MeshData::outputToFile(jt, kt)` writes five files:
+Native ``MeshData::outputToFile(jt, kt)`` writes five files:
 
-    H2U2V2.OUT   header + H2= / U2= / V2= blocks (10-per-line, every 100
-                 inserts an extra blank-spaced newline). Format
-                 ``setw(10) fixed setprecision(4)``.
-    ZUV.OUT      same header + Z2= / W2= / FI= blocks, same format.
+    H2U2V2.OUT   header + H2= / U2= / V2= blocks (10-per-line, an extra
+                 5-space-prefixed newline every 100 cells, ``setw(10)
+                 fixed setprecision(4)`` numeric format).
+    ZUV.OUT      same header + Z2= / W2= / FI= blocks.
     SIDE.OUT     one-time geometry dump at (jt=0, kt=1): COSF / SINF /
                  SIDE / AREA blocks using the default ostream precision.
-    XY-TEC.DAT   TEC visualization with VARIABLES + ZONE headers, X/Y
-                 coordinates, then H2 / Z2 / U2 / V2 / W2 cell values
-                 followed by NAP cell connectivity.
-    TIMELOG.OUT  one float per frame: ``jt2 / NDAYS`` with
-                 ``setprecision(4)``.
+    XY-TEC.DAT   TEC visualization with VARIABLES + ZONE headers, X / Y
+                 coordinates (in original-frame units), then H2 / Z2 /
+                 U2 / V2 / W2 cell-centred values, then NAP cell
+                 connectivity.
+    TIMELOG.OUT  one float per frame: ``jt2 / NDAYS`` with ``setprecision(4)``.
 
-Helpers in this module reproduce that format using Python ``f"{v:10.4f}"``
-formatting (mathematically identical to ``setw(10) fixed
-setprecision(4)`` for finite values).
-
-Public surface::
-
-    OutputWriter(out_dir, mesh, dtype)
-        .write_initial(initial_state)         # called once at start
-        .write_frame(jt, kt, state)            # called every NTOUTPUT day
-
-``state`` is a dict containing arrays H, U, V, Z, ZBC, plus optional
-F0..F3 (unused — fluxes are not in the native OUTPUT files).
-``mesh`` is the dict returned by ``mesh_loader_f1.load_hydro_mesh`` or
-``mesh_loader_f2.load_mesh``; this writer normalises both layouts.
+This module reproduces those formats byte-for-byte for the deterministic
+parts (header line, 10x100 newline cadence, fixed-precision values).
+The mesh loaders now expose ``NAP``, ``XP``, ``YP``, ``XIMIN``, and
+``YIMIN`` so the writer can reconstruct the original-frame coordinates
+that native writes via ``XP[i] + XIMIN``.
 """
 import math
 import os
@@ -35,41 +26,79 @@ import os
 import numpy as np
 
 
-HM1_KEY = "HM1"
-HM2_KEY = "HM2"
-
-
 def _fmt10_4(v):
-    """Reproduce C++ ``setw(10) fixed setprecision(4)``.
+    """Reproduce C++ ``setw(10) fixed setprecision(4)`` for finite floats."""
+    return f"{float(v):10.4f}"
 
-    Note: Python's ``f"{v:10.4f}"`` matches the C++ format byte-for-byte
-    for finite floats whose magnitude fits in the 10-character field.
+
+def _dt_field(dt, fixed_p4):
+    """Reproduce native ``setw(3) << DT`` where DT is ``Real``.
+
+    The native C++ stream carries ``std::fixed`` + ``std::setprecision(4)``
+    state across frames once the first H2= block has been written. This
+    means:
+
+      * On the very first frame (no H2= block yet), DT prints with the
+        default ostream precision (``  4`` for an integer DT, ``0.5``
+        for fractional).
+      * On every subsequent frame, DT prints in ``fixed`` precision 4
+        (``4.0000``, ``0.5000``).
+
+    ``fixed_p4`` selects between the two regimes.
     """
-    return f"{v:10.4f}"
+    if fixed_p4:
+        return f"{float(dt):.4f}"
+    if float(dt).is_integer():
+        return f"{int(dt):>3d}"
+    text = f"{float(dt):g}"
+    if len(text) < 3:
+        text = " " * (3 - len(text)) + text
+    return text
+
+
+def _header_line(jt2, kt, dt, fixed_p4):
+    """Native header bytes (between the leading two blank lines and trailing newline)."""
+    return (
+        f" JT={jt2:>5d}"
+        f"  KT={kt - 1:>5d}"
+        f"  DT={_dt_field(dt, fixed_p4)}"
+        f" SEC"
+        f"  T={0:>2d}H"
+        f"  NSF={0:>2d}/0"
+        f"  WEC=0/"
+        f"  CQL=0"
+        f"  INE=0"
+    )
 
 
 def _write_block_10x100(stream, cell_values):
-    """Write ``cell_values`` with the native 10-per-line / 100-per-block
-    newline cadence and 5-space indentation."""
+    """Write ``cell_values`` matching native's per-block newline cadence.
+
+    Native (in pseudo-code):
+        for i in range(N):
+            if i % 10 == 0:
+                stream.write("\\n     ")
+            if i != 0 and i % 100 == 0:
+                stream.write("\\n     ")
+            stream.write(setw(10) fixed setprecision(4) << v)
+    """
     for i, v in enumerate(cell_values):
         if i % 10 == 0:
             stream.write("\n     ")
         if i != 0 and i % 100 == 0:
             stream.write("\n     ")
-        stream.write(_fmt10_4(float(v)))
+        stream.write(_fmt10_4(v))
 
 
 def _flow_angle(u, v):
-    """Match the native ``MeshData::FI`` function. Return angle in
-    *degrees* scaled by the same factor as native (the multiplier 57.298
-    converts the radian result to ~degrees, exactly as native does)."""
+    """Replicate native ``MeshData::FI``. Result in degrees scaled by 57.298."""
     MPI = 3.1416
     if u * v != 0.0:
         w = math.atan2(abs(v), abs(u))
         if u * v > 0.0:
             fi = w if u > 0.0 else MPI + w
         else:
-            fi = (MPI - w) if v > 0.0 else (2.0 * MPI - w)
+            fi = MPI - w if v > 0.0 else 2.0 * MPI - w
     else:
         if u == 0.0 and v >= 0.0:
             fi = MPI / 2.0
@@ -82,49 +111,67 @@ def _flow_angle(u, v):
     return fi * 57.298
 
 
-def _flat_edges(mesh):
-    """Return ``(KLAS, NAC, COSF, SINF, SIDE, AREA, ZBC)`` as flat numpy
-    arrays in 0-indexed, cell-major order. Handles both F1 (1-indexed
-    2-D arrays) and F2 (already flat) mesh dicts."""
-    if "CEL" in mesh:  # F1 layout
+# ---------------------------------------------------------------------------
+# Mesh metadata extraction (handles both F1 and F2 dict layouts)
+# ---------------------------------------------------------------------------
+
+def _flatten_mesh(mesh):
+    """Normalise an F1 (1-indexed 2D arrays, key ``CEL``) or F2 (flat 0-indexed,
+    key ``CELL``) mesh dict into the per-edge / per-cell flat arrays this
+    writer needs.
+
+    Returns dict with keys ``cell``, ``klas``, ``cosf``, ``sinf``, ``side``,
+    ``area``, ``zbc``, ``nap`` (shape (cell, 4) cell-major), ``xp``, ``yp``,
+    ``ximin``, ``yimin``, ``hm1``.
+    """
+    if "CEL" in mesh:  # F1
         cell = int(mesh["CEL"])
-        klas = np.zeros(cell * 4, dtype=np.int32)
-        nac = np.zeros(cell * 4, dtype=np.int32)
-        cosf = np.zeros(cell * 4, dtype=np.float64)
-        sinf = np.zeros(cell * 4, dtype=np.float64)
-        side = np.zeros(cell * 4, dtype=np.float64)
+        nedge = cell * 4
+        klas = np.zeros(nedge, dtype=np.int32)
+        cosf = np.zeros(nedge, dtype=np.float64)
+        sinf = np.zeros(nedge, dtype=np.float64)
+        side = np.zeros(nedge, dtype=np.float64)
         for c in range(cell):
             for j in range(4):
                 klas[4 * c + j] = int(mesh["KLAS"][j + 1, c + 1])
-                nac[4 * c + j] = int(mesh["NAC"][j + 1, c + 1])
                 cosf[4 * c + j] = float(mesh["COSF"][j + 1, c + 1])
                 sinf[4 * c + j] = float(mesh["SINF"][j + 1, c + 1])
                 side[4 * c + j] = float(mesh["SIDE"][j + 1, c + 1])
-        area = np.asarray(mesh["AREA"])[1:].astype(np.float64)
-        zbc = np.asarray(mesh["ZBC"])[1:].astype(np.float64)
-        # F1 has NAP at index 0 sentinel
-        nap = np.asarray(mesh["NAP"])[1:, 1:].T  # (CEL, 4)
+        area = np.asarray(mesh["AREA"])[1:].astype(np.float64).copy()
+        zbc = np.asarray(mesh["ZBC"])[1:].astype(np.float64).copy()
+        nap = np.asarray(mesh["NAP"])[1:, 1:].T.astype(np.int32).copy()  # (cell, 4)
+        xp = np.asarray(mesh["XP"])[1:].astype(np.float64).copy()
+        yp = np.asarray(mesh["YP"])[1:].astype(np.float64).copy()
     else:
         cell = int(mesh["CELL"])
-        klas = np.asarray(mesh["KLAS"]).astype(np.int32)
-        nac = np.asarray(mesh["NAC"]).astype(np.int32)
-        cosf = np.asarray(mesh["COSF"]).astype(np.float64)
-        sinf = np.asarray(mesh["SINF"]).astype(np.float64)
-        side = np.asarray(mesh["SIDE"]).astype(np.float64)
-        area = np.asarray(mesh["AREA"]).astype(np.float64)
-        zbc = np.asarray(mesh["ZBC"]).astype(np.float64)
-        # F2 mesh keeps NAP 1-indexed shape (5, CELL+1) — drop the row 0
-        # sentinel and column 0 sentinel before transposing.
-        nap_raw = np.asarray(mesh.get("NAP"))
-        if nap_raw.ndim == 2 and nap_raw.shape[1] == cell + 1:
-            nap = nap_raw[1:, 1:].T  # (CELL, 4)
-        else:
-            nap = None
-    return cell, klas, nac, cosf, sinf, side, area, zbc, nap
+        klas = np.asarray(mesh["KLAS"]).astype(np.int32).copy()
+        cosf = np.asarray(mesh["COSF"]).astype(np.float64).copy()
+        sinf = np.asarray(mesh["SINF"]).astype(np.float64).copy()
+        side = np.asarray(mesh["SIDE"]).astype(np.float64).copy()
+        area = np.asarray(mesh["AREA"]).astype(np.float64).copy()
+        zbc = np.asarray(mesh["ZBC"]).astype(np.float64).copy()
+        nap_raw = np.asarray(mesh["NAP"])
+        nap = nap_raw[1:, 1:].T.astype(np.int32).copy()  # (cell, 4)
+        xp = np.asarray(mesh["XP"])[1:].astype(np.float64).copy()
+        yp = np.asarray(mesh["YP"])[1:].astype(np.float64).copy()
+    return {
+        "cell": cell,
+        "klas": klas,
+        "cosf": cosf,
+        "sinf": sinf,
+        "side": side,
+        "area": area,
+        "zbc": zbc,
+        "nap": nap,
+        "xp": xp,
+        "yp": yp,
+        "ximin": float(mesh["XIMIN"]),
+        "yimin": float(mesh["YIMIN"]),
+        "hm1": float(mesh["HM1"]),
+    }
 
 
-def _normalise_cell_state(state, cell):
-    """Return finite-only H/U/V/Z numpy arrays of length cell."""
+def _normalise_state(state, cell):
     def to_np(arr):
         a = np.asarray(arr)
         if a.size == cell + 1:
@@ -135,19 +182,6 @@ def _normalise_cell_state(state, cell):
 
 
 # ---------------------------------------------------------------------------
-# Header lines
-# ---------------------------------------------------------------------------
-
-def _header_line(jt2, kt, dt):
-    # native:  printf-equivalent of
-    #   " JT=%5d  KT=%5d  DT=%3d SEC  T= 0H  NSF= 0/0  WEC=0.00/  CQL=0.00  INE=0"
-    return (
-        f" JT={jt2:>5d}  KT={kt - 1:>5d}  DT={int(dt):>3d} SEC  "
-        f"T= 0H  NSF= 0/0  WEC=0/  CQL=0  INE=0"
-    )
-
-
-# ---------------------------------------------------------------------------
 # Writer
 # ---------------------------------------------------------------------------
 
@@ -155,38 +189,35 @@ class OutputWriter:
     """Stream-mode writer for the five native OUTPUT files."""
 
     def __init__(self, out_dir, mesh, dt, ndays):
-        self.out_dir = out_dir
         os.makedirs(out_dir, exist_ok=True)
+        self.out_dir = out_dir
         self.dt = float(dt)
         self.ndays = int(ndays)
-        cell, klas, nac, cosf, sinf, side, area, zbc, nap = _flat_edges(mesh)
-        self.cell = cell
-        self.klas = klas
-        self.nac = nac
-        self.cosf = cosf
-        self.sinf = sinf
-        self.side = side
-        self.area = area
-        self.zbc = zbc
-        self.nap = nap
-        self.hm1 = float(mesh[HM1_KEY])
-        # XP / YP for XY-TEC: F1 stores 1-indexed, F2 stores 0-indexed.
-        xp = np.asarray(mesh.get("XP"))
-        yp = np.asarray(mesh.get("YP"))
-        if xp.ndim == 1:
-            if xp.size == self.cell or (nap is not None and xp.size > self.cell):
-                # Drop sentinel if present
-                if xp.size > 0 and xp.size == yp.size and (nap is not None and xp.size != self.cell):
-                    pass
-        self.xp = xp
-        self.yp = yp
-        # Open streams (truncate)
+        meta = _flatten_mesh(mesh)
+        self.cell = meta["cell"]
+        self.klas = meta["klas"]
+        self.cosf = meta["cosf"]
+        self.sinf = meta["sinf"]
+        self.side = meta["side"]
+        self.area = meta["area"]
+        self.zbc = meta["zbc"]
+        self.nap = meta["nap"]
+        self.xp = meta["xp"]
+        self.yp = meta["yp"]
+        self.ximin = meta["ximin"]
+        self.yimin = meta["yimin"]
+        self.hm1 = meta["hm1"]
         self.h2u2v2 = open(os.path.join(out_dir, "H2U2V2.OUT"), "w")
         self.zuv = open(os.path.join(out_dir, "ZUV.OUT"), "w")
         self.timelog = open(os.path.join(out_dir, "TIMELOG.OUT"), "w")
         self.xy_tec = open(os.path.join(out_dir, "XY-TEC.DAT"), "w")
         self.side_file = open(os.path.join(out_dir, "SIDE.OUT"), "w")
         self._side_written = False
+        # Native C++ stream carries ``std::fixed << std::setprecision(4)``
+        # across frames once the first H2= block has been written. We
+        # mirror that state so DT formats identically.
+        self._h2u2v2_p4 = False
+        self._zuv_p4 = False
 
     def close(self):
         for f in (self.h2u2v2, self.zuv, self.timelog, self.xy_tec, self.side_file):
@@ -202,8 +233,7 @@ class OutputWriter:
         self.close()
 
     # ---------------------------------------------------------------- SIDE.OUT
-    def write_side_once(self):
-        """Write SIDE.OUT (only on first frame, jt=0 kt=1)."""
+    def _write_side_once(self):
         if self._side_written:
             return
         self._side_written = True
@@ -232,34 +262,33 @@ class OutputWriter:
             s.write(f"{i + 1}    {self.area[i]}\n")
 
     # ---------------------------------------------------------------- header
-    def _write_header(self, stream, jt2, kt):
+    def _write_header(self, stream, jt2, kt, fixed_p4):
         stream.write(" \n \n")
-        stream.write(_header_line(jt2, kt, self.dt))
+        stream.write(_header_line(jt2, kt, self.dt, fixed_p4))
         stream.write("\n")
 
     # ---------------------------------------------------------------- frame
     def write_frame(self, jt, kt, state):
-        """Append one frame to all five output files."""
-        H, U, V, Z = _normalise_cell_state(state, self.cell)
-        # Gate field clamping: native zeroes H/U/V where H<=HM1; Z falls back to ZBC.
-        h_clamped = np.where(H <= self.hm1, 0.0, H)
-        u_clamped = np.where(H <= self.hm1, 0.0, U)
-        v_clamped = np.where(H <= self.hm1, 0.0, V)
-        z_clamped = np.where(H <= self.hm1, self.zbc, Z)
-        # W and FI use raw U/V where wet, 0 where dry.
+        H, U, V, Z = _normalise_state(state, self.cell)
         wet = H > self.hm1
+        h_clamped = np.where(wet, H, 0.0)
+        u_clamped = np.where(wet, U, 0.0)
+        v_clamped = np.where(wet, V, 0.0)
+        z_clamped = np.where(wet, Z, self.zbc)
         w2 = np.where(wet, np.sqrt(U * U + V * V), 0.0)
 
         jt2 = jt if kt == 1 else jt + 1
 
-        # SIDE.OUT only for the very first frame.
         if not self._side_written and jt == 0 and kt == 1:
-            self.write_side_once()
+            self._write_side_once()
 
         # H2U2V2.OUT
-        self._write_header(self.h2u2v2, jt2, kt)
+        self._write_header(self.h2u2v2, jt2, kt, self._h2u2v2_p4)
         self.h2u2v2.write("     \n     H2=")
         _write_block_10x100(self.h2u2v2, h_clamped)
+        # The first H2= block sets fixed/setprecision(4) on the C++
+        # stream; everything after carries that state.
+        self._h2u2v2_p4 = True
         self.h2u2v2.write("\n     \n     U2=")
         _write_block_10x100(self.h2u2v2, u_clamped)
         self.h2u2v2.write("\n     \n     V2=")
@@ -267,9 +296,10 @@ class OutputWriter:
         self.h2u2v2.write(" \n")
 
         # ZUV.OUT
-        self._write_header(self.zuv, jt2, kt)
+        self._write_header(self.zuv, jt2, kt, self._zuv_p4)
         self.zuv.write("     \n     Z2=")
         _write_block_10x100(self.zuv, z_clamped)
+        self._zuv_p4 = True
         self.zuv.write("\n     \n     W2=")
         _write_block_10x100(self.zuv, w2)
         self.zuv.write("\n     \n     FI=")
@@ -286,31 +316,21 @@ class OutputWriter:
         ratio = jt2 / float(self.ndays) if self.ndays else 0.0
         self.timelog.write(f"{ratio:.4f}\n")
 
-        # XY-TEC.DAT (best-effort: only if XP/YP/NAP present)
-        if self.xp is not None and self.yp is not None and self.nap is not None:
-            self._write_xy_tec_frame(jt2, kt, h_clamped, z_clamped, u_clamped,
-                                     v_clamped, w2)
+        # XY-TEC.DAT
+        self._write_xy_tec_frame(h_clamped, z_clamped, u_clamped, v_clamped, w2)
 
         for f in (self.h2u2v2, self.zuv, self.timelog, self.xy_tec):
             f.flush()
 
     # ---------------------------------------------------------------- XY-TEC
-    def _write_xy_tec_frame(self, jt2, kt, h, z, u, v, w):
+    def _write_xy_tec_frame(self, h, z, u, v, w):
         s = self.xy_tec
-        # Strip XP/YP sentinel if present (F1 layout has length NOD+1)
-        if self.xp.size > 0 and self.xp.size == self.yp.size and self.xp.size != self.cell:
-            xp = self.xp[1:] if self.xp.size > 1 else self.xp
-            yp = self.yp[1:] if self.yp.size > 1 else self.yp
-        else:
-            xp = self.xp
-            yp = self.yp
-        nod = int(xp.size)
+        nod = int(self.xp.size)
         s.write(' VARIABLES = "X", "Y", "H2", "Z2","U2","V2","W2"\n')
         s.write(f"ZONE N={nod}, E={self.cell}, DATAPACKING=BLOCK, ZONETYPE=FEQUADRILATERAL\n")
         s.write("VARLOCATION=([3-7]=CELLCENTERED)\n")
 
-        def write_per_node(arr):
-            # 10 values per line, separated by spaces, native uses %.4f
+        def write_per_node(arr, line_break_first=False):
             for i, val in enumerate(arr):
                 if i % 10 == 0 and i != 0:
                     s.write("\n")
@@ -323,19 +343,15 @@ class OutputWriter:
                     s.write("\n")
                 s.write(f"{float(val):.4f} ")
 
-        # Coordinates need original-frame XIMIN/YIMIN added back; native re-adds
-        # XIMIN before writing. We don't have them here cheaply; use the values
-        # as stored. Native does ``XP[i] + XIMIN`` but our XP already had the
-        # origin shift applied — close enough for visualization-only output.
-        write_per_node(xp)
-        write_per_node(yp)
+        # Native re-adds XIMIN / YIMIN before writing coordinates.
+        write_per_node(self.xp + self.ximin)
+        write_per_node(self.yp + self.yimin)
         write_per_cell(h)
         write_per_cell(z)
         write_per_cell(u)
         write_per_cell(v)
         write_per_cell(w)
         s.write("\n")
-        # Cell connectivity (NAP rows)
         for i in range(self.cell):
             row = self.nap[i]
             s.write(" ".join(str(int(x)) for x in row) + "\n")

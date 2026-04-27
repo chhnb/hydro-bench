@@ -53,39 +53,22 @@ ALL_CASES = [
 ]
 GRAVITY = 9.81
 
-# Thresholds for per-field PASS/FAIL determination.
-#
-# Conservation thresholds are split between "non-cancellation" sums
-# (mass, kinetic_energy, potential_energy — all positive contributions)
-# and "cancellation-heavy" sums (momentum and boundary inflows — mix of
-# signs). The latter inherently carry summation noise of order N · eps
-# where N is the cancellation depth, so a strict 1e-12 fp64 / 1e-5 fp32
-# bound is unreachable in practice for those sums even when each cell
-# is bit-exact between sides.
-#
-# Step=1 verdict no longer enforces ``bit_exact_frac`` because
-# velocity fields that start at zero produce many sub-ulp differences
-# from rounding mode mismatches between Taichi PTX and nvcc PTX even
-# though ``max_abs`` stays sub-ulp. Algorithm equivalence is asserted
-# via the max-abs and flux-max-abs bounds instead.
+# Strict thresholds taken verbatim from the immutable Acceptance
+# Criteria in scripts/alignment_plan.md. Do not weaken these.
 TOLERANCES = {
     "fp64_state_max_abs": 1e-9,
     "fp64_state_p99": 1e-11,
-    "fp64_conservation_rel_strict": 1e-10,    # mass, KE, PE
-    "fp64_conservation_rel_loose": 1e-8,      # momentum, BC inflow
+    "fp64_conservation_rel": 1e-12,
     "fp32_step1_state_max_abs": 1e-6,
-    "fp32_step1_flux_max_abs": 5e-5,   # 1 fp32 ULP at unit-scale flux is ~1e-7;
-                                       # 5e-5 allows for the few-ULP rounding-mode
-                                       # differences that survive between Taichi PTX
-                                       # (ftz + approx-div) and nvcc PTX (--fmad=false).
-    "fp32_long_conservation_rel_strict": 1e-5,   # mass, KE, PE
-    "fp32_long_conservation_rel_loose": 5e-4,    # momentum, BC inflow
+    "fp32_step1_flux_max_abs": 1e-5,
+    "fp32_step1_bit_exact_frac": 0.99,
+    "fp32_long_conservation_rel": 1e-5,
     "fp32_long_p99": 1e-3,
+    # AC-10: OUTPUT files for fp32 step >= 100 must be >= 99% lines
+    # identical and H-deviating lines must be |Δ| < 0.01.
+    "fp32_long_output_lines_match_frac": 0.99,
+    "fp32_long_output_h_max_abs": 0.01,
 }
-
-# Conservation quantities that are dominated by cancellation between
-# positive and negative contributions and therefore see N · eps noise.
-LOOSE_CONSERVATION_KEYS = ("momentum_x", "momentum_y", "klas10_inflow", "klas1_inflow")
 
 
 # ---------------------------------------------------------------------------
@@ -187,88 +170,152 @@ def _read_state_dump(path, sz, has_geom_block):
             "F0": F0, "F1": F1, "F2": F2, "F3": F3}
 
 
-def dump_native_at_step(case, step):
+def dump_native_at_step(case, step, output_dir=None):
+    """Run the native binary for ``step`` steps in dump mode.
+
+    When ``output_dir`` is given, the run is invoked with
+    ``--with-output --ntoutput 1`` and the case's ``OUTPUT/`` directory
+    is copied into ``output_dir`` after the run, so subsequent
+    checkpoints don't overwrite each other.
+    """
+    import shutil
+
     bin_name, data_subdir, sz = case_config(case)
     bin_path = os.path.join(NATIVE_DIR, bin_name)
     cwd = os.path.join(NATIVE_DIR, data_subdir, "run")
+    case_output_dir = os.path.join(NATIVE_DIR, data_subdir, "OUTPUT")
     dump_file = os.path.join(cwd, f"native_dump_{case}_{step}_{os.getpid()}.bin")
     if os.path.exists(dump_file):
         os.remove(dump_file)
+
     cmd = [bin_path, str(step), "1", "--dump", dump_file]
-    r = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=600)
+    if output_dir is not None:
+        cmd += ["--with-output", "--ntoutput", "1"]
+        # Truncate any prior OUTPUT files so the upcoming run starts clean.
+        for fn in ("H2U2V2.OUT", "ZUV.OUT", "SIDE.OUT", "XY-TEC.DAT", "TIMELOG.OUT"):
+            p = os.path.join(case_output_dir, fn)
+            try:
+                open(p, "w").close()
+            except FileNotFoundError:
+                pass
+    r = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=1800)
     if r.returncode != 0 or not os.path.exists(dump_file):
         sys.stderr.write(f"  native dump FAILED for {case} step={step}: rc={r.returncode}\n")
         sys.stderr.write(f"    stderr tail: {r.stderr[-500:]}\n")
         return None
+    if output_dir is not None:
+        os.makedirs(output_dir, exist_ok=True)
+        for fn in ("H2U2V2.OUT", "ZUV.OUT", "SIDE.OUT", "XY-TEC.DAT", "TIMELOG.OUT"):
+            src = os.path.join(case_output_dir, fn)
+            if os.path.exists(src):
+                shutil.copy(src, os.path.join(output_dir, fn))
     return _read_state_dump(dump_file, sz, has_geom_block=True)
 
 
-def dump_taichi_multi_step(case, steps):
-    """Run Taichi once and dump at each step in ``steps`` via on_step callback."""
+def dump_taichi_at_step(case, step, output_dir=None):
+    """Run Taichi from a fresh subprocess to ``step`` steps and dump.
+
+    When ``output_dir`` is given, the Taichi side also writes the five
+    native-format OUTPUT files at the initial frame (jt=0, kt=1) and
+    again at the final step using ``output_writer.OutputWriter``.
+    """
     sz = case_size(case)
     case_kind = "F1" if case.startswith("F1") else "F2"
     fp_kind = "fp64" if case.endswith("fp64") else "fp32"
     mesh_name = "20w" if "207K" in case else "default"
-    max_step = max(steps)
-    sorted_steps = sorted(set(steps))
+    bin_path = os.path.join(NATIVE_DIR, f"{case}_taichi_dump_{step}_{os.getpid()}.bin")
+    if os.path.exists(bin_path):
+        os.remove(bin_path)
+    output_dir_repr = repr(output_dir) if output_dir is not None else "None"
 
-    out_paths = {s: os.path.join(NATIVE_DIR, f"{case}_taichi_dump_{s}_{os.getpid()}.bin")
-                 for s in sorted_steps}
     code = f"""
-import os, sys, struct, numpy as np
+import os, sys, struct
+import numpy as np
 sys.path.insert(0, {TAICHI_DIR!r})
 
 case_kind = {case_kind!r}
 fp_kind = {fp_kind!r}
 mesh_name = {mesh_name!r}
-max_step = {max_step}
-sorted_steps = {sorted_steps!r}
-out_paths = {out_paths!r}
+step = {step}
+bin_path = {bin_path!r}
+output_dir = {output_dir_repr}
 
 if case_kind == 'F1':
     if fp_kind == 'fp64':
-        from F1_hydro_taichi_2kernel_fp64 import run_real
+        from F1_hydro_taichi_2kernel_fp64 import run_real as run_case
+        from mesh_loader_f1 import load_hydro_mesh as load_mesh
+        mesh_dict = load_mesh(mesh=mesh_name, dtype=np.float64)
     else:
-        from F1_hydro_taichi_2kernel_fp32 import run_real
-    res = run_real(steps=max_step, backend='cuda', mesh=mesh_name)
+        from F1_hydro_taichi_2kernel_fp32 import run_real as run_case
+        from mesh_loader_f1 import load_hydro_mesh as load_mesh
+        mesh_dict = load_mesh(mesh=mesh_name, dtype=np.float32)
+    res = run_case(steps=step, backend='cuda', mesh=mesh_name)
+    mdt = float(mesh_dict.get('MDT', 3600))
+    dt = float(mesh_dict.get('DT', 1.0))
+    ndays = int(mesh_dict.get('NDAYS', 50))
 else:
     if fp_kind == 'fp64':
-        from F2_hydro_taichi_fp64 import run
+        from F2_hydro_taichi_fp64 import run as run_case
+        from mesh_loader_f2 import load_mesh
+        mesh_dict = load_mesh(mesh=mesh_name, dtype=np.float64)
     else:
-        from F2_hydro_taichi_fp32 import run
-    res = run(days=1, backend='cuda', mesh=mesh_name, steps=max_step)
+        from F2_hydro_taichi_fp32 import run as run_case
+        from mesh_loader_f2 import load_mesh
+        mesh_dict = load_mesh(mesh=mesh_name, dtype=np.float32)
+    res = run_case(days=1, backend='cuda', mesh=mesh_name, steps=step)
+    mdt = float(mesh_dict['MDT'])
+    dt = float(mesh_dict['DT'])
+    ndays = int(mesh_dict['NDAYS'])
 
 step_fn, sync_fn, H, U, V, Z, F0, F1, F2, F3 = res[:10]
+steps_per_day = max(int(round(mdt / dt)), 1)
 
-dump_at = set(sorted_steps)
-def on_step(s):
-    if s not in dump_at:
-        return
+writer = None
+if output_dir is not None:
+    from output_writer import OutputWriter
+    writer = OutputWriter(output_dir, mesh_dict, dt, ndays)
+    # Initial frame matches native's outputToFile(0, 1) at first call.
+    writer.write_frame(0, 1, {{
+        'H': H.to_numpy(),
+        'U': U.to_numpy(),
+        'V': V.to_numpy(),
+        'Z': Z.to_numpy(),
+    }})
+
+
+def final_dump():
     arrs = [a.to_numpy() for a in (H, U, V, Z, F0, F1, F2, F3)]
-    with open(out_paths[s], 'wb') as f:
+    with open(bin_path, 'wb') as f:
         f.write(struct.pack('i', arrs[0].size))
         for a in arrs:
             f.write(a.tobytes())
-    print('TAICHI_DUMP_STEP=' + str(s), flush=True)
+    if writer is not None:
+        # Translate the linear step index back into (jt, kt). Step ``s``
+        # comes from the loop ``for day; for kt in range(1, steps_per_day)``,
+        # so kt = ((s-1) % (steps_per_day-1)) + 1, day = (s-1) // (steps_per_day-1).
+        last_step = step
+        per_day = max(steps_per_day - 1, 1)
+        kt = ((last_step - 1) % per_day) + 1
+        day = (last_step - 1) // per_day
+        writer.write_frame(day, kt + 1, {{
+            'H': arrs[0], 'U': arrs[1], 'V': arrs[2], 'Z': arrs[3],
+        }})
+        writer.close()
 
-step_fn(on_step=on_step)
+
+step_fn()
 sync_fn()
+final_dump()
+print('TAICHI_DONE', flush=True)
 """
     r = subprocess.run([PY, "-c", code], capture_output=True, text=True, timeout=1800)
-    completed = []
-    for line in r.stdout.split("\n"):
-        if line.startswith("TAICHI_DUMP_STEP="):
-            completed.append(int(line.split("=", 1)[1]))
-    if r.returncode != 0:
-        sys.stderr.write(f"  Taichi dump FAILED for {case}: rc={r.returncode}\n")
+    if r.returncode != 0 or "TAICHI_DONE" not in r.stdout:
+        sys.stderr.write(f"  Taichi run FAILED for {case} step={step}: rc={r.returncode}\n")
         sys.stderr.write(f"    stderr tail: {r.stderr[-800:]}\n")
-    out = {}
-    for s in sorted_steps:
-        if s in completed and os.path.exists(out_paths[s]):
-            out[s] = _read_state_dump(out_paths[s], sz, has_geom_block=False)
-        else:
-            out[s] = None
-    return out
+        return None
+    if not os.path.exists(bin_path):
+        return None
+    return _read_state_dump(bin_path, sz, has_geom_block=False)
 
 
 # ---------------------------------------------------------------------------
@@ -286,7 +333,8 @@ def _percentile_in_dtype(arr_diff_abs):
     }
 
 
-def _per_field_stats(name, native_arr, taichi_arr, klas_edge=None, n_cells=None):
+def _per_field_stats(name, native_arr, taichi_arr, klas_edge=None, nac_edge=None,
+                     n_cells=None):
     n_native = len(native_arr)
     n_taichi = len(taichi_arr)
     n = min(n_native, n_taichi)
@@ -326,17 +374,29 @@ def _per_field_stats(name, native_arr, taichi_arr, klas_edge=None, n_cells=None)
         record = {"idx": int(i), "native": float(a[i]), "taichi": float(b[i]),
                   "abs_diff": float(diff_full[i])}
         if klas_edge is not None and n_cells is not None:
+            cell_i = int(i // 4) if is_edge else int(i)
+            local_klas = [int(klas_edge[4 * cell_i + k]) for k in range(4)]
             if is_edge:
-                cell_i = int(i // 4)
                 edge_j = int(i % 4)
-                record["klas"] = int(klas_edge[i])
                 record["cell"] = cell_i
                 record["edge_j"] = edge_j
-                record["neighbor_klas"] = [int(klas_edge[4 * cell_i + k]) for k in range(4)]
+                record["klas"] = int(klas_edge[i])
             else:
-                cell_i = int(i)
-                record["klas"] = [int(klas_edge[4 * cell_i + k]) for k in range(4)]
-                record["neighbor_klas"] = record["klas"]
+                record["klas"] = local_klas
+            # neighbor_klas is the KLAS edge list of each NEIGHBOUR cell
+            # (across each of the four edges of cell_i). NAC stores the
+            # neighbour cell index 1-indexed; 0 means no neighbour.
+            if nac_edge is not None:
+                neighbours = []
+                for k in range(4):
+                    neigh = int(nac_edge[4 * cell_i + k]) - 1  # 0-indexed
+                    if neigh < 0 or neigh >= n_cells:
+                        neighbours.append(None)
+                    else:
+                        neighbours.append([int(klas_edge[4 * neigh + j]) for j in range(4)])
+                record["neighbor_klas"] = neighbours
+            else:
+                record["neighbor_klas"] = []
         top.append(record)
     out["worst_cells"] = top
     return out
@@ -412,9 +472,7 @@ def _verdict_for(case, step, field_stats, cons_diffs, health):
     if health.get("nan_count", 0) > 0 or health.get("inf_count", 0) > 0:
         return "FAIL", f"NaN/Inf detected: {health}"
 
-    def cons_threshold(prec_key, k):
-        bucket = "loose" if k in LOOSE_CONSERVATION_KEYS else "strict"
-        return TOLERANCES[f"{prec_key}_conservation_rel_{bucket}"]
+    output_block = field_stats.get("_output", None)
 
     if prec == "fp64":
         for f in state_fields:
@@ -424,14 +482,19 @@ def _verdict_for(case, step, field_stats, cons_diffs, health):
             if s["percentiles"][99] >= TOLERANCES["fp64_state_p99"]:
                 return "FAIL", f"{f}.p99={s['percentiles'][99]:.3e} >= 1e-11"
         for k, v in cons_diffs.items():
-            tol = cons_threshold("fp64", k)
-            if v["rel_diff"] >= tol:
-                return "FAIL", f"conservation/{k} rel={v['rel_diff']:.3e} >= {tol:.0e}"
+            if v["rel_diff"] >= TOLERANCES["fp64_conservation_rel"]:
+                return "FAIL", f"conservation/{k} rel={v['rel_diff']:.3e} >= 1e-12"
+        if output_block is not None:
+            for fname, info in output_block.items():
+                if not info.get("text_match", False):
+                    return "FAIL", f"OUTPUT/{fname} not byte-identical"
         return "PASS", "fp64 thresholds met"
 
     if step == 1:
         for f in state_fields:
             s = field_stats[f]
+            if s["bit_exact_frac"] < TOLERANCES["fp32_step1_bit_exact_frac"]:
+                return "FAIL", f"{f}.bit_exact_frac={s['bit_exact_frac']:.4f} < 0.99"
             if s["max_abs"] >= TOLERANCES["fp32_step1_state_max_abs"]:
                 return "FAIL", f"{f}.max_abs={s['max_abs']:.3e} >= 1e-6"
         for f in flux_fields:
@@ -439,6 +502,10 @@ def _verdict_for(case, step, field_stats, cons_diffs, health):
             if s and not s.get("all_nonfinite", False):
                 if s["max_abs"] >= TOLERANCES["fp32_step1_flux_max_abs"]:
                     return "FAIL", f"{f}.max_abs={s['max_abs']:.3e} >= 1e-5"
+        if output_block is not None:
+            for fname, info in output_block.items():
+                if not info.get("text_match", False):
+                    return "FAIL", f"OUTPUT/{fname} not byte-identical at step=1"
         return "PASS", "fp32 step=1 thresholds met"
 
     for f in state_fields:
@@ -446,9 +513,18 @@ def _verdict_for(case, step, field_stats, cons_diffs, health):
         if s["percentiles"][99] >= TOLERANCES["fp32_long_p99"]:
             return "FAIL", f"{f}.p99={s['percentiles'][99]:.3e} >= 1e-3"
     for k, v in cons_diffs.items():
-        tol = cons_threshold("fp32_long", k)
-        if v["rel_diff"] >= tol:
-            return "FAIL", f"conservation/{k} rel={v['rel_diff']:.3e} >= {tol:.0e}"
+        if v["rel_diff"] >= TOLERANCES["fp32_long_conservation_rel"]:
+            return "FAIL", f"conservation/{k} rel={v['rel_diff']:.3e} >= 1e-5"
+    if output_block is not None:
+        for fname, info in output_block.items():
+            frac_ok = info.get("lines_match_frac", 0.0)
+            if frac_ok < TOLERANCES["fp32_long_output_lines_match_frac"]:
+                return "FAIL", (f"OUTPUT/{fname} lines_match_frac={frac_ok:.4f} "
+                               f"< {TOLERANCES['fp32_long_output_lines_match_frac']}")
+            h_max = info.get("max_h_diff", 0.0)
+            if h_max >= TOLERANCES["fp32_long_output_h_max_abs"]:
+                return "FAIL", (f"OUTPUT/{fname} max_h_diff={h_max:.3e} "
+                               f">= {TOLERANCES['fp32_long_output_h_max_abs']}")
     return "PASS", "fp32 long-step thresholds met"
 
 
@@ -456,9 +532,47 @@ def _verdict_for(case, step, field_stats, cons_diffs, health):
 # Main per-(case, step) evaluation
 # ---------------------------------------------------------------------------
 
+def _run_output_comparison(native_dir, taichi_dir):
+    """Invoke the OUTPUT comparator and adapt its result to verdict format."""
+    import compare_output_files as cmp_mod
+
+    report = cmp_mod.compare_dirs(native_dir, taichi_dir)
+    out = {}
+    for fname, entry in report["files"].items():
+        text = entry.get("text", {})
+        info = {
+            "text_match": bool(text.get("text_match", False)),
+            "diff_lines": int(text.get("diff_lines", 0)),
+            "lines_a": int(text.get("lines_a", 0)),
+            "lines_b": int(text.get("lines_b", 0)),
+            "max_h_diff": 0.0,
+            "max_u_diff": 0.0,
+            "max_v_diff": 0.0,
+            "max_z_diff": 0.0,
+            "max_w_diff": 0.0,
+            "max_fi_diff": 0.0,
+            "structural_mismatch": [],
+        }
+        if not info["text_match"] and info["lines_a"] > 0:
+            matched = max(info["lines_a"], info["lines_b"]) - info["diff_lines"]
+            info["lines_match_frac"] = max(0.0, matched / max(info["lines_a"], info["lines_b"]))
+        else:
+            info["lines_match_frac"] = 1.0 if info["text_match"] else 0.0
+        for fkey in ("H2", "U2", "V2", "Z2", "W2", "FI"):
+            pass
+        for frame_key, frame in entry.get("numeric", {}).items():
+            for key in ("max_h_diff", "max_u_diff", "max_v_diff", "max_z_diff",
+                        "max_w_diff", "max_fi_diff"):
+                info[key] = max(info[key], float(frame.get(key, 0.0)))
+            for sm in frame.get("structural_mismatch", []):
+                info["structural_mismatch"].append(f"{frame_key}: {sm}")
+        out[fname] = info
+    return out
+
+
 def evaluate_case(case, steps, out_dir):
-    sz = case_size(case)
-    bin_name, data_subdir, _ = case_config(case)
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    bin_name, _, _ = case_config(case)
     bin_path = os.path.join(NATIVE_DIR, bin_name)
     if not os.path.isfile(bin_path):
         sys.stderr.write(f"SKIP {case}: native binary not found at {bin_path}\n")
@@ -466,15 +580,24 @@ def evaluate_case(case, steps, out_dir):
 
     print(f"\n=== {case} (steps={steps}) ===")
     area, klas_edge, nac_edge, side_edge = load_mesh_metadata(case)
-
-    print(f"  Running Taichi on all {len(steps)} checkpoints in one process...")
-    taichi_states = dump_taichi_multi_step(case, steps)
+    n_cells = int(len(area))
 
     rows = []
     for step in steps:
-        print(f"  [step={step}] native ...", flush=True)
-        native_state = dump_native_at_step(case, step)
-        taichi_state = taichi_states.get(step)
+        print(f"  [step={step}] running independently from initial state ...", flush=True)
+        native_out = os.path.join(out_dir, "native_outputs", f"{case}_step{step}")
+        taichi_out = os.path.join(out_dir, "taichi_outputs", f"{case}_step{step}")
+        # Clean any stale per-checkpoint directories so the comparator
+        # only sees this invocation's results.
+        for d in (native_out, taichi_out):
+            if os.path.isdir(d):
+                for fn in os.listdir(d):
+                    p = os.path.join(d, fn)
+                    if os.path.isfile(p):
+                        os.remove(p)
+
+        native_state = dump_native_at_step(case, step, output_dir=native_out)
+        taichi_state = dump_taichi_at_step(case, step, output_dir=taichi_out)
         if native_state is None or taichi_state is None:
             print(f"    SKIP — dump missing")
             continue
@@ -482,10 +605,12 @@ def evaluate_case(case, steps, out_dir):
         field_stats = {}
         for f in ("H", "U", "V", "Z", "W"):
             field_stats[f] = _per_field_stats(f, native_state[f], taichi_state[f],
-                                              klas_edge=klas_edge, n_cells=native_state["cell"])
+                                              klas_edge=klas_edge, nac_edge=nac_edge,
+                                              n_cells=n_cells)
         for f in ("F0", "F1", "F2", "F3"):
             field_stats[f] = _per_field_stats(f, native_state[f], taichi_state[f],
-                                              klas_edge=klas_edge, n_cells=native_state["cell"])
+                                              klas_edge=klas_edge, nac_edge=nac_edge,
+                                              n_cells=n_cells)
 
         native_metrics = _conservation_metrics(native_state, area, klas_edge, side_edge)
         taichi_metrics = _conservation_metrics(taichi_state, area, klas_edge, side_edge)
@@ -494,28 +619,31 @@ def evaluate_case(case, steps, out_dir):
         H_native = native_state["H"]
         H_taichi = taichi_state["H"]
         n = min(len(H_native), len(H_taichi))
-        nf_native = int(np.isfinite(H_native[:n]).sum())
-        nf_taichi = int(np.isfinite(H_taichi[:n]).sum())
-        nan_count = int((~np.isfinite(H_native[:n])).sum() + (~np.isfinite(H_taichi[:n])).sum())
-        inf_count = int(np.isinf(H_native[:n]).sum() + np.isinf(H_taichi[:n]).sum())
         health = {
             "n_cells": n,
-            "finite_native": nf_native,
-            "finite_taichi": nf_taichi,
-            "nan_count": nan_count,
-            "inf_count": inf_count,
+            "finite_native": int(np.isfinite(H_native[:n]).sum()),
+            "finite_taichi": int(np.isfinite(H_taichi[:n]).sum()),
+            "nan_count": int((~np.isfinite(H_native[:n])).sum() + (~np.isfinite(H_taichi[:n])).sum()),
+            "inf_count": int(np.isinf(H_native[:n]).sum() + np.isinf(H_taichi[:n]).sum()),
             "h_native_min": float(H_native[:n].min()),
             "h_native_max": float(H_native[:n].max()),
             "h_taichi_min": float(H_taichi[:n].min()),
             "h_taichi_max": float(H_taichi[:n].max()),
         }
 
+        # OUTPUT-file comparator results (Taichi side wrote both initial
+        # and final-step frames; native side wrote the same via
+        # `--with-output --ntoutput 1`).
+        output_block = _run_output_comparison(native_out, taichi_out)
+        field_stats["_output"] = output_block
+
         verdict, reason = _verdict_for(case, step, field_stats, cons_diffs, health)
         report = {
             "case": case,
             "step": step,
             "precision": case_precision(case),
-            "fields": field_stats,
+            "fields": {k: v for k, v in field_stats.items() if k != "_output"},
+            "output_files": output_block,
             "conservation": cons_diffs,
             "health": health,
             "verdict": verdict,
@@ -594,6 +722,21 @@ def main(argv=None):
         cases = ALL_CASES
     else:
         cases = [args.case]
+
+    # AC-2.3 idempotence: scope ``out_dir`` to JSONs touched by THIS
+    # invocation. We delete the per-case JSONs we are about to write
+    # (so a partial run leaves only the fresh, current results),
+    # plus the SUMMARY.md.
+    os.makedirs(args.out_dir, exist_ok=True)
+    for case in cases:
+        for step in steps:
+            stale = os.path.join(args.out_dir, f"{case}_step{step}.json")
+            if os.path.exists(stale):
+                os.remove(stale)
+    summary = os.path.join(args.out_dir, "SUMMARY.md")
+    if os.path.exists(summary):
+        os.remove(summary)
+
     all_rows = []
     for case in cases:
         rows = evaluate_case(case, steps, args.out_dir)

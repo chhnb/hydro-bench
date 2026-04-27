@@ -70,28 +70,55 @@ def parse_blocks(path):
 
 
 def diff_blocks(native, taichi):
-    """Return per-(frame, label) diff stats from two parsed dicts."""
-    keys = sorted(set(native) | set(taichi))
-    out = {}
-    for key in keys:
-        a = native.get(key)
-        b = taichi.get(key)
-        frame, label = key
-        if a is None or b is None:
-            out[f"frame{frame}.{label}"] = {"missing": True,
-                                            "native_present": a is not None,
-                                            "taichi_present": b is not None}
-            continue
-        n = min(len(a), len(b))
-        diff = np.abs(a[:n] - b[:n])
-        out[f"frame{frame}.{label}"] = {
-            "n_values": int(n),
-            "max_abs": float(diff.max()) if n else 0.0,
-            "mean_abs": float(diff.mean()) if n else 0.0,
-            "p99": float(np.percentile(diff, 99)) if n else 0.0,
-            "n_diff_gt_1e-3": int((diff > 1e-3).sum()),
-            "n_diff_gt_1e-1": int((diff > 1e-1).sum()),
+    """Return per-frame diff stats with explicit field-keyed entries.
+
+    Output schema (matches AC-6.2):
+
+        {
+            "frame{N}": {
+                "max_h_diff": float,
+                "max_u_diff": float,
+                "max_v_diff": float,
+                "max_z_diff": float,
+                "max_w_diff": float,
+                "max_fi_diff": float,
+                "structural_mismatch": list[str],   # missing labels per side
+                "n_values": int,
+            }
         }
+    """
+    label_to_key = {
+        "H2": "max_h_diff",
+        "U2": "max_u_diff",
+        "V2": "max_v_diff",
+        "Z2": "max_z_diff",
+        "W2": "max_w_diff",
+        "FI": "max_fi_diff",
+    }
+    frames = sorted({key[0] for key in (set(native) | set(taichi))})
+    out = {}
+    for frame in frames:
+        entry = {k: 0.0 for k in label_to_key.values()}
+        entry["structural_mismatch"] = []
+        entry["n_values"] = 0
+        for label, key_name in label_to_key.items():
+            a = native.get((frame, label))
+            b = taichi.get((frame, label))
+            if a is None and b is None:
+                continue
+            if a is None or b is None:
+                entry["structural_mismatch"].append(
+                    f"{label} missing on {'native' if a is None else 'taichi'}"
+                )
+                entry[key_name] = float("inf")
+                continue
+            n = min(len(a), len(b))
+            if n == 0:
+                continue
+            diff = np.abs(a[:n] - b[:n])
+            entry[key_name] = float(diff.max())
+            entry["n_values"] = max(entry["n_values"], int(n))
+        out[f"frame{frame}"] = entry
     return out
 
 
@@ -165,14 +192,15 @@ def summarize(report):
             if not num:
                 lines.append("    numeric: no parseable blocks")
                 continue
-            for label in ("H2", "U2", "V2", "Z2", "W2", "FI"):
-                rows = [v for (k, v) in num.items() if k.endswith("." + label) and "max_abs" in v]
-                if not rows:
-                    continue
-                max_abs = max(r["max_abs"] for r in rows)
-                p99 = max(r["p99"] for r in rows)
-                lines.append(f"    {label}: max_abs={max_abs:.4e}, p99={p99:.4e}, "
-                             f"frames={len(rows)}")
+            for frame_key, frame in num.items():
+                struct = frame.get("structural_mismatch", [])
+                if struct:
+                    lines.append(f"    {frame_key}: structural_mismatch={struct}")
+                lines.append(
+                    f"    {frame_key}: H={frame['max_h_diff']:.4e} "
+                    f"U={frame['max_u_diff']:.4e} V={frame['max_v_diff']:.4e} "
+                    f"Z={frame['max_z_diff']:.4e} W={frame['max_w_diff']:.4e}"
+                )
     return "\n".join(lines)
 
 

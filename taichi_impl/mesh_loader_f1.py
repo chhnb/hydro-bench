@@ -103,9 +103,13 @@ def load_hydro_mesh(mesh="default", dtype=np.float64):
         parts = lines[k].split()
         XP[k] = dtype.type(float(parts[1]))
         YP[k] = dtype.type(float(parts[2]))
-    # Normalize to origin (fp32 - fp32 in fp32 mode).
-    XP[1:] -= XP[1:].min()
-    YP[1:] -= YP[1:].min()
+    # Capture origin shift (XIMIN/YIMIN) before normalising. The XY-TEC
+    # writer needs these to recover original-frame coordinates that
+    # match native ``XP[i] + XIMIN``.
+    XIMIN = dtype.type(XP[1:].min())
+    YIMIN = dtype.type(YP[1:].min())
+    XP[1:] -= XIMIN
+    YP[1:] -= YIMIN
 
     # ---- PNAP.DAT: cell-to-node ----
     lines = rd("PNAP.DAT")
@@ -387,12 +391,13 @@ def load_hydro_mesh(mesh="default", dtype=np.float64):
     return dict(
         CEL=CEL, NOD=NOD, HM1=HM1, HM2=HM2, NZ=NZ, NQ=NQ, DT=DT,
         MDT=MDT, NDAYS=NDAYS,
-        NAC=NAC, KLAS=KLAS, SIDE=SIDE, COSF=COSF, SINF=SINF,
+        NAC=NAC, NAP=NAP, KLAS=KLAS, SIDE=SIDE, COSF=COSF, SINF=SINF,
         SLCOS=SLCOS, SLSIN=SLSIN,
         AREA=AREA, ZBC=ZBC, ZB1=ZB1, FNC=FNC, NV=NV,
         H=H, U=U_init.copy(), V=V_init.copy(), Z=Z_init.copy(), W=W,
         MBQ=MBQ, NNQ=NNQ, MBZ=MBZ, NNZ=NNZ,
         ZT=ZT, DZT=DZT, QT=QT, DQT=DQT,
+        XP=XP, YP=YP, XIMIN=XIMIN, YIMIN=YIMIN,
         XC=XC, YC=YC,
     )
 
