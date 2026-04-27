@@ -13,6 +13,7 @@ spmd-venv/
 cuda_native_impl/F1_hydro_native_*
 cuda_native_impl/F2_hydro_native_*
 cuda_native_impl/hydro_native_benchmark
+cuda_native_impl/fp32_src/hydro_native_benchmark
 cuda_native_impl/*.original
 cuda_native_impl/*.bak
 cuda_native_impl/*_nofma
@@ -47,3 +48,6 @@ results/*.txt
 *.swo
 .DS_Store
 /venv
+
+# Tool stubs
+.codex

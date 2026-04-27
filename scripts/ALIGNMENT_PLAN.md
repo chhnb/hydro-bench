@@ -1,0 +1,289 @@
+# Taichi vs Native CUDA Alignment Plan
+
+> 全方位对齐方案：覆盖 4 个 case × 2 个精度 × 多 step 检查点 × 全字段 + 仿真原生输出文件 + 守恒量。
+
+## 0. 现状速览
+
+### Case 矩阵
+
+| Case | CELL | DT | steps_per_day | NDAYS | NTOUTPUT | **max_total_steps** |
+|------|------|----|----|-------|----------|---------------------|
+| F1_6.7K  | 6,675   | 1.0s | 3,600 | 50    | (无)  | 179,950   |
+| F1_207K  | 207,234 | 0.5s | 7,200 | 50    | 50    | 359,950   |
+| F2_24K   | 24,020  | 4.0s | 900   | 2,000 | 1     | 1,798,000 |
+| F2_207K  | 207,234 | 0.5s | 7,200 | 50    | 50    | 359,950   |
+
+### Step=900 实测对齐（既有数据）
+
+| Case | fp64 max_abs | fp32 step=1 | fp32 step=900 max_abs | 状态 |
+|------|--------------|-------------|----------------------|------|
+| F1_6.7K  | 3.1e-14 | sub-ulp | 2.0e-4   | ✅ fp64 / ⚠️ fp32 |
+| F1_207K  | 2.2e-12 | **4.3e-5 ❌** | **1.10 ❌** | **算法层有未对齐路径** |
+| F2_24K   | 2.0e-14 | sub-ulp | 2.2e-5   | ✅ fp64 / ✅ fp32 |
+| F2_207K  | 2.2e-12 | sub-ulp | 4.3e-2   | ✅ fp64 / ⚠️ fp32 (混沌) |
+
+**结论：fp64 全过；fp32 只有 F1_207K 是真 bug，其它是 fp32 双曲 PDE 的混沌漂移（不可避免）。**
+
+---
+
+## 1. 验证维度
+
+### 1.1 高精度二进制 dump（已有，将增强）
+
+| 字段 | 维度 | 说明 |
+|------|------|------|
+| H, U, V, Z, W | CELL | 单元格状态（W=√(U²+V²) 派生） |
+| F0, F1, F2, F3 | 4·CELL | 边通量 |
+
+**升级点**：补 W；多 step 检查点；分布统计（mean/p50/p90/p99/p99.9）；worst-K cells 定位。
+
+### 1.2 仿真原生输出文件（新增）
+
+`mesh.cpp::outputToFile(jt, kt)` 在每 NTOUTPUT 天写：
+
+| 文件 | 内容 | 频率 | 精度 |
+|------|------|------|------|
+| **SIDE.OUT** | COSF, SINF, SIDE, AREA | 一次（jt=0, kt=1） | 默认 | 
+| **H2U2V2.OUT** | H2, U2, V2 + JT/KT 头 | 每 NTOUTPUT 天 | `setprecision(4)` |
+| **ZUV.OUT** | Z2, W2, FI（流向角） | 每 NTOUTPUT 天 | `setprecision(4)` |
+| **XY-TEC.DAT** | TEC 可视化（X,Y,H2,Z2,U2,V2,W2 + 单元连接） | 每 NTOUTPUT 天 | `setprecision(4)` |
+| **TIMELOG.OUT** | jt/NDAYS 进度比 | 每 NTOUTPUT 天 | `setprecision(4)` |
+
+**重要**：当前 `benchmark.cu` 没有调用 `outputToFile()`（OUTPUT 目录下的 *.OUT 都是 0 字节）。需要：
+1. native 侧加 `--with-output` 选项，按 NTOUTPUT 天调用 `outputToFile()`。
+2. Taichi 侧实现等价的 `dump_output_files()`，相同格式（4 位小数）。
+3. 写一个 `compare_output_files.py` 做文本/数值双重对比。
+
+**为什么测这个**：
+- 这些文件是真实下游用户消费的格式 → 是产品级对齐的金标准
+- `setprecision(4)` 自带容忍 ~1e-4 → fp32 长步漂移天然落进容忍区
+- 文件按 NTOUTPUT 多日 dump → 自带 step-axis 检查点
+- TEC 可以直接做可视化 diff
+
+### 1.3 守恒量（新增，混沌不敏感）
+
+每个检查点计算：
+
+| 量 | 公式 | 物理含义 |
+|----|------|----------|
+| 总水量 | Σ H·AREA | 质量守恒（除 BC 影响） |
+| 动量 X | Σ H·U·AREA | x 方向动量 |
+| 动量 Y | Σ H·V·AREA | y 方向动量 |
+| 动能 | Σ ½H(U²+V²)·AREA | 总动能 |
+| 位能 | Σ ½g·H²·AREA | 总位能 |
+| KLAS=10 累计入流 | Σ F0·SIDE on KLAS=10 | BC 通量积分 |
+| KLAS=1 累计入流 | Σ F0·SIDE on KLAS=1 | 水位 BC 通量 |
+| H 极值 | (H_min, H_max) | 数值稳定性指示 |
+| NaN/Inf 计数 | finite cells / total | 健康检查 |
+
+混沌发散不影响守恒量 — 这是 fp32 长步对齐的核心判据。
+
+---
+
+## 2. Step-axis 检查点矩阵
+
+每个 case 在以下 step 检查点都跑：
+
+```
+checkpoints = [1, 100, 900, 7200, 36000, 72000, MAX_PER_CASE]
+```
+
+| step | 物理意义 | 对应 case 时间 |
+|------|----------|----------------|
+| 1       | 算法等价证明（必须 ≤1 ulp）| 第 1 步 |
+| 100     | 早期动力学 | F2_24K=400s, F2_207K=50s |
+| 900     | 1 整天 (F2_24K) | 1 day |
+| 7,200   | 1 整天 (F2_207K, F1_207K) | 1 day |
+| 36,000  | 5 天（F2_207K） | 5 days |
+| 72,000  | 10 天（F2_207K, F1_207K）；10 天（F2_24K=320 day） | — |
+| MAX     | 完整 horizon | F1_6.7K=180K, F1_207K=360K, F2_24K=1.8M, F2_207K=360K |
+
+---
+
+## 3. 通过条件（按精度+步数）
+
+### 3.1 fp64
+
+任意 step：
+
+```
+✓ 守恒量 |Δquantity / quantity| < 1e-12
+✓ 二进制 dump 全字段 max_abs < 1e-9
+✓ 二进制 dump 全字段 p99 diff < 1e-11
+✓ OUTPUT 文件文本 100% 一致（4 位小数）
+✓ NaN/Inf 计数 = 0
+```
+
+### 3.2 fp32 step=1
+
+```
+✓ ≥ 99% cells H/U/V/Z bit-exact
+✓ max_abs < 1e-6（state field）
+✓ flux F0..F3 max_abs < 1e-5
+✓ OUTPUT 文件 100% 一致（4 位小数容忍足够）
+```
+
+### 3.3 fp32 step ≥ 100（混沌期）
+
+```
+✓ 守恒量 |Δquantity / quantity| < 1e-5    ← 核心判据
+✓ p99 diff < 1e-3（state field）
+✓ OUTPUT 文件 ≥ 99% 行一致（4 位小数）；H 偏差行 |Δ| < 0.01
+✓ max_abs 不严格要求（允许混沌发散）
+✓ NaN/Inf 计数 = 0
+```
+
+### 3.4 报告字段（每个 case × 精度 × step）
+
+```json
+{
+  "case": "F2_207K_fp32",
+  "step": 7200,
+  "fields": {
+    "H": {"max_abs": ..., "mean_abs": ..., "p50": ..., "p90": ..., "p99": ..., "p99.9": ...,
+          "n_diff_gt_1e-7": ..., "n_diff_gt_1e-5": ..., "n_diff_gt_1e-3": ..., "n_diff_gt_1e-1": ...,
+          "worst_cells": [{"idx": ..., "native": ..., "taichi": ..., "klas": ...}, ...]},
+    "U": {...}, "V": {...}, "Z": {...}, "W": {...},
+    "F0": {...}, "F1": {...}, "F2": {...}, "F3": {...}
+  },
+  "conservation": {
+    "mass": {"native": ..., "taichi": ..., "rel_diff": ...},
+    "momentum_x": {...}, "momentum_y": {...},
+    "kinetic_energy": {...}, "potential_energy": {...},
+    "klas10_inflow": {...}, "klas1_inflow": {...}
+  },
+  "output_files": {
+    "H2U2V2_OUT": {"text_match": true/false, "diff_lines": ..., "max_h_diff": ...},
+    "ZUV_OUT": {...}, "SIDE_OUT": {...}, "TIMELOG_OUT": {...}
+  },
+  "health": {"finite_cells": ..., "h_min": ..., "h_max": ...},
+  "verdict": "PASS" | "FAIL"
+}
+```
+
+---
+
+## 4. 实施步骤
+
+### Stage 1：修 F1_207K_fp32 step=1 不 bit-exact 的 bug（先做）
+
+**症状**：F1_207K_fp32 step=1 H max_abs=4.3e-5（应该 sub-ulp）。
+
+**调查**：
+1. 加单 cell 探针：dump KLAS=1 boundary cell 的 step=1 前后 H/U/V/Z/F0..F3
+2. 对比 Taichi vs native 在 BC 路径（KLAS=1 的 30 次迭代）的收敛点
+3. 怀疑顺序：(a) `ti.abs(URB-UR0) <= 0.0001` 收敛 off-by-iter；(b) FTZ subnormal 触发；(c) ZT/DZT 加载顺序差异
+
+**通过**：F1_207K_fp32 step=1 max_abs < 1e-6。
+
+### Stage 2：升级 `check_correctness.py`
+
+新增功能：
+- 接受 step list：`--steps "1,100,900,7200,72000,max"`
+- 计算守恒量并对齐
+- 分布统计（percentile）
+- worst-K cells 定位（包含 KLAS）
+- 输出 JSON 到 `results/alignment/{case}_{precision}_{step}.json`
+- 输出 Markdown 汇总表 `results/alignment/SUMMARY.md`
+
+### Stage 3：补 native CUDA 输出文件能力
+
+修改 `cuda_native_impl/benchmark.cu` + `fp32_src/benchmark.cu`：
+- 加 `--with-output` 选项
+- 在 `runSteps()` 内部按 `kt%（NTOUTPUT × steps_per_day）== 0` 触发 `outputToFile(jt, kt)`
+- 重新初始化 `OUTPUT/` 目录前清空旧文件
+
+### Stage 4：补 Taichi 输出文件等价实现
+
+新增 `taichi_impl/output_writer.py`：
+- 实现与 `mesh.cpp::outputToFile` 完全相同的格式（同 setprecision、同空格、同换行规则）
+- 在 `step_fn` 内每 NTOUTPUT × steps_per_day 触发 dump
+- 文件名相同（H2U2V2.OUT 等），落到 Taichi 独立 OUTPUT 目录
+
+### Stage 5：写 `compare_output_files.py`
+
+输入：两个 OUTPUT 目录路径（native + taichi）
+输出：
+- 文本 diff（`difflib.unified_diff`）
+- 数值 diff（解析每个 H/U/V/Z 块，计算 max/mean/p99）
+- 单文件 JSON 报告
+
+### Stage 6：跑全矩阵
+
+```bash
+# 4 case × 2 精度 × 7 step = 56 组（fp32 跑全部，fp64 验证守恒）
+bash scripts/run_alignment_full.sh
+```
+
+每组耗时：
+- step=1 / 100 / 900：~1s/侧
+- step=7,200 / 36,000：~5s/侧
+- step=72,000：~10s/侧
+- step=MAX (F2_24K=1.8M)：~90s/侧；其它 ~20s/侧
+
+**预估总时间：~30 分钟**（4 case × 2 精度 × 7 step × 2 实现 ≈ 56 × 30s 平均）。
+
+### Stage 7：定位长 step 漂移源（可选）
+
+对 F2_207K_fp32 在 100, 1000, 7200, 36000, 72000 step 都做 trajectory dump，画"漂移生长曲线"：
+- max_abs(step) - 找混沌进入饱和的拐点
+- 守恒量 |Δ|(step) - 验证守恒不漂
+- TEC 可视化对比 - 直观看哪些区域漂
+
+---
+
+## 5. 文件结构（实施完成后）
+
+```
+hydro-bench/
+├── scripts/
+│   ├── ALIGNMENT_PLAN.md           # 本文件
+│   ├── check_correctness.py        # 升级：多 step + 守恒量 + 分布
+│   ├── compare_output_files.py     # 新：OUTPUT 文件对比
+│   ├── run_alignment_full.sh       # 新：全矩阵跑测
+│   └── plot_drift_curve.py         # 新：漂移曲线可视化
+├── taichi_impl/
+│   └── output_writer.py            # 新：Taichi 输出 .OUT 等价实现
+├── cuda_native_impl/
+│   ├── benchmark.cu                # 增强：--with-output
+│   └── fp32_src/benchmark.cu       # 同上
+└── results/
+    └── alignment/
+        ├── SUMMARY.md              # 全矩阵汇总
+        ├── {case}_{prec}_{step}.json  # 每组详细报告
+        ├── native/{case}/OUTPUT/   # native 的 .OUT 文件
+        └── taichi/{case}/OUTPUT/   # taichi 的 .OUT 文件
+```
+
+---
+
+## 6. 决策清单（开工前确认）
+
+- [ ] 守恒量是 fp32 长步对齐的核心判据 — 同意？
+- [ ] OUTPUT 文件（4 位小数）作为 fp32 用户级对齐的金标准 — 同意？
+- [ ] step 检查点 `[1, 100, 900, 7200, 36000, 72000, MAX]` — 加密/减密？
+- [ ] MAX step 全跑（F2_24K=1.8M ≈ 90s/侧）— 还是上限到 72,000？
+- [ ] 先做 Stage 1（修 F1_207K_fp32 step=1 bug）— OK？
+
+---
+
+## 附录 A：fp32 PTX 指令模式差异（已实测）
+
+| 指令 | Taichi (默认) | nvcc `--fmad=false` | nvcc `--ftz=true --prec-div=false` |
+|------|---------------|---------------------|------------------------------------|
+| mul fp32 | `mul.ftz.f32` | `FMUL`（非 FTZ） | `FMUL.FTZ` |
+| add fp32 | `add.ftz.f32` | `FADD`（非 FTZ） | `FADD.FTZ` |
+| FMA 合并 | `fma.rn.ftz.f32`（LLVM 仍合并）| `FFMA`（仍出现，来自 fma() 调用） | `FFMA` |
+| div fp32 | `div.approx.ftz.f32` | `div.rn.f32`（IEEE） | `div.approx.f32` |
+| sqrt fp32 | `sqrt.rn.ftz.f32` | `sqrt.rn.f32` | `sqrt.rn.ftz.f32` |
+
+**结论**：用 `nvcc --fmad=false --ftz=true --prec-div=false --prec-sqrt=true` 可以让 native 更接近 Taichi 的 PTX 模式，但**不会减小 fp32 长步漂移**（实测：换 flag 后 native 自比都漂 0.79）。这只在 step=1 bit-exact 调试有用。
+
+---
+
+## 附录 B：已知陷阱
+
+1. **F1_207K 和 F2_207K 用同一份 mesh 数据**（PXY/INITIAL md5 相同）— Taichi 侧用同一个 binary 文件夹是否预期？需确认。
+2. **F2_24K 的 TIME.DAT 第 3 行只是 `1`** — 暂时假设 NTOUTPUT=1（每 1 天 dump）。
+3. **OUTPUT 文件 setprecision(4)** 会丢 fp64 精度信息，所以 fp64 的算法等价证明仍要靠二进制 dump，OUTPUT 文件只用于产品级一致性校验。
+4. **outputToFile 在 jt=0,kt=1 也写一帧**（初始状态），需要在 Taichi 侧也写。
