@@ -27,8 +27,10 @@ CASES="${CASES:-F1_6.7K_fp64 F1_6.7K_fp32 F2_24K_fp64 F2_24K_fp32 F1_207K_fp64 F
 OUT_DIR="results/alignment"
 mkdir -p "$OUT_DIR"
 
-# Truncate prior summary (the python script will rewrite it).
-echo "" > "$OUT_DIR/SUMMARY.md"
+# Clear stale per-(case, step) JSONs and SUMMARY.md so the aggregator
+# only sees results from this invocation.
+rm -f "$OUT_DIR"/*_step*.json "$OUT_DIR/SUMMARY.md"
+rm -rf "$OUT_DIR/native_outputs" "$OUT_DIR/taichi_outputs"
 
 n_pass=0
 n_fail=0
