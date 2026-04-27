@@ -663,30 +663,75 @@ def evaluate_case(case, steps, out_dir):
 # Summary
 # ---------------------------------------------------------------------------
 
+_SUMMARY_HEADER = (
+    "| case | step | verdict | H max_abs | U max_abs | V max_abs | mass rel | KE rel | reason |"
+)
+_SUMMARY_DIVIDER = (
+    "|------|------|---------|-----------|-----------|-----------|----------|--------|--------|"
+)
+
+
+def _row_to_md(r):
+    H = r["fields"]["H"]
+    U = r["fields"]["U"]
+    V = r["fields"]["V"]
+    mass = r["conservation"]["mass"]
+    ke = r["conservation"]["kinetic_energy"]
+    return (
+        f"| {r['case']} | {r['step']} | {r['verdict']} | "
+        f"{H['max_abs']:.3e} | {U['max_abs']:.3e} | {V['max_abs']:.3e} | "
+        f"{mass['rel_diff']:.3e} | {ke['rel_diff']:.3e} | {r['reason']} |"
+    )
+
+
+def _parse_existing_summary(summary_path):
+    """Parse pre-existing SUMMARY.md rows into a ``(case, step) -> markdown_line`` map.
+
+    Returns an empty dict if the file is missing or unparseable.
+    """
+    rows = {}
+    if not os.path.exists(summary_path):
+        return rows
+    with open(summary_path) as f:
+        for line in f:
+            line = line.rstrip("\n")
+            if not line.startswith("| ") or line.startswith("| case "):
+                continue
+            if line.startswith("|---"):
+                continue
+            parts = [p.strip() for p in line.split("|")]
+            # parts is [, case, step, verdict, ...]
+            if len(parts) < 4:
+                continue
+            try:
+                case = parts[1]
+                step = int(parts[2])
+            except (IndexError, ValueError):
+                continue
+            if case and case != "case":
+                rows[(case, step)] = line
+    return rows
+
+
 def write_summary_md(rows, out_dir):
-    if not rows:
-        return
+    """Merge ``rows`` (from this invocation) with prior SUMMARY.md rows.
+
+    Earlier per-(case, step) entries are preserved; rows from this run
+    overwrite any matching keys. The merged table is rewritten in
+    sorted (case, step) order.
+    """
     summary_path = os.path.join(out_dir, "SUMMARY.md")
-    lines = [
-        "# Alignment Validation Summary",
-        "",
-        "| case | step | verdict | H max_abs | U max_abs | V max_abs | mass rel | KE rel | reason |",
-        "|------|------|---------|-----------|-----------|-----------|----------|--------|--------|",
-    ]
+    existing = _parse_existing_summary(summary_path)
     for r in rows:
-        H = r["fields"]["H"]
-        U = r["fields"]["U"]
-        V = r["fields"]["V"]
-        mass = r["conservation"]["mass"]
-        ke = r["conservation"]["kinetic_energy"]
-        lines.append(
-            f"| {r['case']} | {r['step']} | {r['verdict']} | "
-            f"{H['max_abs']:.3e} | {U['max_abs']:.3e} | {V['max_abs']:.3e} | "
-            f"{mass['rel_diff']:.3e} | {ke['rel_diff']:.3e} | {r['reason']} |"
-        )
+        existing[(r["case"], r["step"])] = _row_to_md(r)
+    if not existing:
+        return
+    body = ["# Alignment Validation Summary", "", _SUMMARY_HEADER, _SUMMARY_DIVIDER]
+    for key in sorted(existing):
+        body.append(existing[key])
     with open(summary_path, "w") as f:
-        f.write("\n".join(lines) + "\n")
-    print(f"\nSummary written to {summary_path}")
+        f.write("\n".join(body) + "\n")
+    print(f"\nSummary written to {summary_path} ({len(existing)} merged rows)")
 
 
 # ---------------------------------------------------------------------------
@@ -723,19 +768,17 @@ def main(argv=None):
     else:
         cases = [args.case]
 
-    # AC-2.3 idempotence: scope ``out_dir`` to JSONs touched by THIS
-    # invocation. We delete the per-case JSONs we are about to write
-    # (so a partial run leaves only the fresh, current results),
-    # plus the SUMMARY.md.
+    # AC-2.3 idempotence: per-(case, step) JSONs are owned by THIS
+    # invocation and rewritten from scratch. SUMMARY.md is merged: rows
+    # from this run overwrite matching keys but earlier rows for other
+    # (case, step) combinations survive. That way a partial run does
+    # not erase prior successful results.
     os.makedirs(args.out_dir, exist_ok=True)
     for case in cases:
         for step in steps:
             stale = os.path.join(args.out_dir, f"{case}_step{step}.json")
             if os.path.exists(stale):
                 os.remove(stale)
-    summary = os.path.join(args.out_dir, "SUMMARY.md")
-    if os.path.exists(summary):
-        os.remove(summary)
 
     all_rows = []
     for case in cases:

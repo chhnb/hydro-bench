@@ -239,27 +239,38 @@ class OutputWriter:
         self._side_written = True
         s = self.side_file
         cell = self.cell
+
+        def cppfloat(v):
+            """Reproduce C++ default ostream float rendering.
+
+            C++ ``std::ostream`` defaults to general format with
+            precision 6 (``cout.precision() == 6``), trimming trailing
+            zeros. Python ``f"{v:.6g}"`` matches that behavior for
+            finite floats.
+            """
+            return f"{float(v):.6g}"
+
         s.write("COSF\n")
         for i in range(cell):
             s.write(f"{i + 1}    ")
             for k in range(4):
-                s.write(f"{self.cosf[4 * i + k]}     ")
+                s.write(f"{cppfloat(self.cosf[4 * i + k])}     ")
             s.write("\n")
         s.write("SINF\n")
         for i in range(cell):
             s.write(f"{i + 1}    ")
             for k in range(4):
-                s.write(f"{self.sinf[4 * i + k]}     ")
+                s.write(f"{cppfloat(self.sinf[4 * i + k])}     ")
             s.write("\n")
         s.write("SIDE\n")
         for i in range(cell):
             s.write(f"{i + 1}    ")
             for k in range(4):
-                s.write(f"{self.side[4 * i + k]}     ")
+                s.write(f"{cppfloat(self.side[4 * i + k])}     ")
             s.write("\n")
         s.write("AREA\n")
         for i in range(cell):
-            s.write(f"{i + 1}    {self.area[i]}\n")
+            s.write(f"{i + 1}    {cppfloat(self.area[i])}\n")
 
     # ---------------------------------------------------------------- header
     def _write_header(self, stream, jt2, kt, fixed_p4):
@@ -330,31 +341,46 @@ class OutputWriter:
         s.write(f"ZONE N={nod}, E={self.cell}, DATAPACKING=BLOCK, ZONETYPE=FEQUADRILATERAL\n")
         s.write("VARLOCATION=([3-7]=CELLCENTERED)\n")
 
-        def write_per_node(arr, line_break_first=False):
+        # Native ``MeshData::outputToFile`` uses three different newline
+        # cadences across the XY-TEC blocks (mesh.cpp:754-826):
+        #   * Per-node (XP/YP):   newline at i%10==0 AND i!=0, trailing endl
+        #   * H2 (per-cell):      newline at every i%10==0 (incl i=0),
+        #                         NO trailing endl
+        #   * Z2/U2/V2/W2:        newline at i%10==0 AND i!=0, trailing endl
+        def write_node(arr):
             for i, val in enumerate(arr):
                 if i % 10 == 0 and i != 0:
                     s.write("\n")
                 s.write(f"{float(val):.4f} ")
             s.write("\n")
 
-        def write_per_cell(arr):
+        def write_h2(arr):
             for i, val in enumerate(arr):
                 if i % 10 == 0:
                     s.write("\n")
                 s.write(f"{float(val):.4f} ")
 
+        def write_other(arr):
+            for i, val in enumerate(arr):
+                if i % 10 == 0 and i != 0:
+                    s.write("\n")
+                s.write(f"{float(val):.4f} ")
+            s.write("\n")
+
         # Native re-adds XIMIN / YIMIN before writing coordinates.
-        write_per_node(self.xp + self.ximin)
-        write_per_node(self.yp + self.yimin)
-        write_per_cell(h)
-        write_per_cell(z)
-        write_per_cell(u)
-        write_per_cell(v)
-        write_per_cell(w)
-        s.write("\n")
+        write_node(self.xp + self.ximin)
+        write_node(self.yp + self.yimin)
+        write_h2(h)
+        write_other(z)
+        write_other(u)
+        write_other(v)
+        write_other(w)
+        # Native emits "NAP[0] NAP[1] NAP[2] NAP[3] \n" — note the
+        # trailing space before the newline (each value is followed by
+        # a literal " " in the C++ loop).
         for i in range(self.cell):
             row = self.nap[i]
-            s.write(" ".join(str(int(x)) for x in row) + "\n")
+            s.write("".join(f"{int(x)} " for x in row) + "\n")
 
 
 __all__ = ["OutputWriter"]

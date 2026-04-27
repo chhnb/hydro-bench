@@ -112,10 +112,21 @@ def diff_blocks(native, taichi):
                 )
                 entry[key_name] = float("inf")
                 continue
-            n = min(len(a), len(b))
+            if len(a) != len(b):
+                # Block-length mismatch is itself a structural failure
+                # (a truncated or overlong block can otherwise look
+                # numerically valid when min-truncated). Force max diff
+                # to inf and record the count discrepancy.
+                entry["structural_mismatch"].append(
+                    f"{label} length mismatch: native={len(a)}, taichi={len(b)}"
+                )
+                entry[key_name] = float("inf")
+                entry["n_values"] = max(entry["n_values"], max(len(a), len(b)))
+                continue
+            n = len(a)
             if n == 0:
                 continue
-            diff = np.abs(a[:n] - b[:n])
+            diff = np.abs(a - b)
             entry[key_name] = float(diff.max())
             entry["n_values"] = max(entry["n_values"], int(n))
         out[f"frame{frame}"] = entry
