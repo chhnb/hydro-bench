@@ -39,6 +39,8 @@ cuda_native_impl/*_native_data/
 # Test outputs
 results/*.jsonl
 results/*.txt
+results/alignment/*.json
+results/alignment/SUMMARY.md
 !results/.gitkeep
 
 # Editor / OS

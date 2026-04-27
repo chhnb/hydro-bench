@@ -29,12 +29,17 @@ def _read_lines(filename, data_dir=None):
         return lines
 
 
-def load_hydro_mesh(mesh="default"):
+def load_hydro_mesh(mesh="default", dtype=np.float64):
     """Load the full hydro-cal 2D mesh and return a dict of arrays.
 
     Args:
         mesh: Dataset name ("default" for 6675 cells, "20w" for 207234 cells)
               or a path to a custom data directory.
+        dtype: numpy dtype for floating-point arrays. Pass np.float32 for the
+              fp32 entrypoint so that geometry arithmetic (XP, YP, SIDE, COSF,
+              SINF, AREA) runs in fp32 directly — matching the native CUDA fp32
+              build, which uses ``Real = float`` throughout ``preCalculate``.
+              Default ``np.float64`` preserves the existing fp64 behavior.
 
     Returns dict with keys:
         CEL, NOD, HM1, HM2, NZ, NQ,
@@ -46,6 +51,7 @@ def load_hydro_mesh(mesh="default"):
     All cell arrays are 1-indexed (index 0 unused).
     2D arrays are [5][CEL+1] (edge index 1..4).
     """
+    dtype = np.dtype(dtype)
     if mesh in MESH_DATASETS:
         data_dir = MESH_DATASETS[mesh]
     elif os.path.isdir(mesh):
@@ -88,14 +94,16 @@ def load_hydro_mesh(mesh="default"):
 
     # ---- PXY.DAT: node coordinates ----
     lines = rd("PXY.DAT")
-    # First line is count
-    XP = np.zeros(NOD + 1, dtype=np.float64)
-    YP = np.zeros(NOD + 1, dtype=np.float64)
+    # Native fp32 build reads coordinates straight into ``std::vector<float>``,
+    # so the origin shift below runs in fp32. Match that by allocating in
+    # the caller's dtype and assigning text→dtype directly.
+    XP = np.zeros(NOD + 1, dtype=dtype)
+    YP = np.zeros(NOD + 1, dtype=dtype)
     for k in range(1, NOD + 1):
         parts = lines[k].split()
-        XP[k] = float(parts[1])
-        YP[k] = float(parts[2])
-    # Normalize to origin
+        XP[k] = dtype.type(float(parts[1]))
+        YP[k] = dtype.type(float(parts[2]))
+    # Normalize to origin (fp32 - fp32 in fp32 mode).
     XP[1:] -= XP[1:].min()
     YP[1:] -= YP[1:].min()
 
@@ -126,14 +134,14 @@ def load_hydro_mesh(mesh="default"):
     # ---- PZBC.DAT: bed elevation ----
     lines = rd("PZBC.DAT")
     # First line is header "PZBC" or count — skip non-numeric
-    ZBC = np.zeros(CEL + 1, dtype=np.float64)
+    ZBC = np.zeros(CEL + 1, dtype=dtype)
     idx = 0
     for line in lines:
         try:
             val = float(line)
             idx += 1
             if idx <= CEL:
-                ZBC[idx] = val
+                ZBC[idx] = dtype.type(val)
         except ValueError:
             continue
 
@@ -160,14 +168,14 @@ def load_hydro_mesh(mesh="default"):
     # ---- Initial conditions ----
     def _read_cell_values(filename):
         lines = rd(filename)
-        arr = np.zeros(CEL + 1, dtype=np.float64)
+        arr = np.zeros(CEL + 1, dtype=dtype)
         idx = 0
         for line in lines:
             try:
                 val = float(line)
                 idx += 1
                 if idx <= CEL:
-                    arr[idx] = val
+                    arr[idx] = dtype.type(val)
             except ValueError:
                 continue
         return arr
@@ -200,13 +208,20 @@ def load_hydro_mesh(mesh="default"):
                             KLAS[j][cell] = 13
 
     # ---- Compute geometry ----
+    # All arithmetic runs in the caller's dtype to match native CUDA's
+    # ``preCalculate`` (which uses ``Real = float`` in the fp32 build).
     NV = np.zeros(CEL + 1, dtype=np.int32)
-    SIDE = np.zeros((5, CEL + 1), dtype=np.float64)
-    COSF = np.zeros((5, CEL + 1), dtype=np.float64)
-    SINF = np.zeros((5, CEL + 1), dtype=np.float64)
-    AREA = np.zeros(CEL + 1, dtype=np.float64)
-    XC = np.zeros(CEL + 1, dtype=np.float64)
-    YC = np.zeros(CEL + 1, dtype=np.float64)
+    SIDE = np.zeros((5, CEL + 1), dtype=dtype)
+    COSF = np.zeros((5, CEL + 1), dtype=dtype)
+    SINF = np.zeros((5, CEL + 1), dtype=dtype)
+    AREA = np.zeros(CEL + 1, dtype=dtype)
+    XC = np.zeros(CEL + 1, dtype=dtype)
+    YC = np.zeros(CEL + 1, dtype=dtype)
+
+    # Use 0-d arrays so accumulations stay in dtype precision rather than
+    # being upcast to Python float (= fp64).
+    zero = dtype.type(0)
+    half = dtype.type(0.5)
 
     for i in range(1, CEL + 1):
         if NAP[1][i] == 0:
@@ -222,22 +237,22 @@ def load_hydro_mesh(mesh="default"):
         nw = [0, NAP[1][i], NAP[2][i], NAP[3][i], NAP[4][i]]
 
         # Centroid
-        sx = 0.0
-        sy = 0.0
+        sx = zero
+        sy = zero
         for j in range(1, NV[i] + 1):
-            sx += XP[nw[j]]
-            sy += YP[nw[j]]
-        XC[i] = sx / NV[i]
-        YC[i] = sy / NV[i]
+            sx = sx + XP[nw[j]]
+            sy = sy + YP[nw[j]]
+        XC[i] = sx / dtype.type(NV[i])
+        YC[i] = sy / dtype.type(NV[i])
 
-        # Area: triangle (1,2,3)
+        # Area: triangle (1,2,3) — match native's ``fabs(...)/2.0`` ordering.
         x1, y1 = XP[nw[1]], YP[nw[1]]
         x2, y2 = XP[nw[2]], YP[nw[2]]
         x3, y3 = XP[nw[3]], YP[nw[3]]
-        AREA[i] = abs((y3 - y1) * (x2 - x1) - (x3 - x1) * (y2 - y1)) / 2.0
+        AREA[i] = np.abs((y3 - y1) * (x2 - x1) - (x3 - x1) * (y2 - y1)) * half
         if NV[i] == 4:
             x4, y4 = XP[nw[4]], YP[nw[4]]
-            AREA[i] += abs((y4 - y1) * (x3 - x1) - (x4 - x1) * (y3 - y1)) / 2.0
+            AREA[i] = AREA[i] + np.abs((y4 - y1) * (x3 - x1) - (x4 - x1) * (y3 - y1)) * half
 
         # Edge geometry
         for j in range(1, NV[i] + 1):
@@ -245,31 +260,32 @@ def load_hydro_mesh(mesh="default"):
             n2 = nw[(j % NV[i]) + 1]
             dx = XP[n1] - XP[n2]
             dy = YP[n2] - YP[n1]
-            length = math.sqrt(dx * dx + dy * dy)
+            length = np.sqrt(dx * dx + dy * dy)
             SIDE[j][i] = length
-            if length > 0.0:
+            if length > 0:
                 SINF[j][i] = dx / length
                 COSF[j][i] = dy / length
 
-    SLCOS = SIDE * COSF
-    SLSIN = SIDE * SINF
+    SLCOS = (SIDE * COSF).astype(dtype, copy=False)
+    SLSIN = (SIDE * SINF).astype(dtype, copy=False)
 
     # ---- Derived arrays ----
-    ZB1 = ZBC + HM1
-    FNC = 9.81 * CV * CV   # g * n^2
+    HM1_d = dtype.type(HM1)
+    ZB1 = (ZBC + HM1_d).astype(dtype, copy=False)
+    FNC = (dtype.type(9.81) * CV * CV).astype(dtype, copy=False)
 
     # Native CUDA mesh.cpp clamps Z and H for dry cells:
     #   if Z[i] <= ZBC[i]: H[i] = HM1; Z[i] = ZB1[i] (= ZBC + HM1)
     #   else: H[i] = Z[i] - ZBC[i]
     # Replicate exactly to match native's initial state bit-for-bit.
     Z = Z_init.copy()
-    H = Z - ZBC
+    H = (Z - ZBC).astype(dtype, copy=False)
     dry_mask = Z <= ZBC
-    H[dry_mask] = HM1
+    H[dry_mask] = HM1_d
     Z[dry_mask] = ZB1[dry_mask]
     ghost_mask = NAP[1] == 0
-    H[ghost_mask] = 0.0
-    W = np.sqrt(U_init ** 2 + V_init ** 2)
+    H[ghost_mask] = zero
+    W = np.sqrt(U_init * U_init + V_init * V_init).astype(dtype, copy=False)
     Z_init = Z  # so the dict below picks up clamped Z
 
     # ---- BC timeseries: per-cell ZT/DZT for KLAS=1 boundary cells ----

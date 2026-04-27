@@ -592,7 +592,14 @@ def run(days=10, backend="cuda", mesh="default", steps=None):
     # ------------------------------------------------------------------
     # Step function
     # ------------------------------------------------------------------
-    def step_fn():
+    def step_fn(on_step=None):
+        """Run the configured number of steps.
+
+        on_step: optional callable invoked as ``on_step(step_index)`` after
+            each step has been synced. The first completed step has
+            index 1. When omitted (default), the loop runs without
+            yielding control, preserving the existing all-at-once behavior.
+        """
         step = 0
         day_limit = mesh["NDAYS"] if steps is not None else min(days, mesh["NDAYS"])
         for day in range(day_limit):
@@ -602,6 +609,9 @@ def run(days=10, backend="cuda", mesh="default", steps=None):
                 calculate_flux(kt, day)
                 update_cell()
                 step += 1
+                if on_step is not None:
+                    ti.sync()
+                    on_step(step)
 
     def sync_fn():
         ti.sync()

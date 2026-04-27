@@ -27,12 +27,18 @@ int main(int argc, char* argv[]) {
     int steps = 899;    // default: 1 day
     int repeat = 10;
     bool do_dump = false;
+    bool with_output = false;
+    int ntoutput_override = -1;
     std::string dump_file = "native_state.bin";
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--dump") == 0 && i + 1 < argc) {
             do_dump = true;
             dump_file = argv[++i];
+        } else if (strcmp(argv[i], "--with-output") == 0) {
+            with_output = true;
+        } else if (strcmp(argv[i], "--ntoutput") == 0 && i + 1 < argc) {
+            ntoutput_override = atoi(argv[++i]);
         } else if (i == 1) {
             steps = atoi(argv[i]);
         } else if (i == 2) {
@@ -89,14 +95,41 @@ int main(int argc, char* argv[]) {
         }
     };
 
+    int ntoutput_value = (ntoutput_override > 0) ? ntoutput_override : mesh_data.NTOUTPUT;
+    if (ntoutput_value <= 0) ntoutput_value = 1;
+    auto runStepsWithOutput = [&](int n) {
+        mesh_view.ToHost(mesh_data);
+        mesh_data.outputToFile(0, 1);
+        int s = 0;
+        for (int day = 0; day < mesh_data.NDAYS && s < n; day++) {
+            for (int kt = 1; kt < steps_per_day && s < n; kt++) {
+                CalculateFlux(mesh_view, kt, day);
+                UpdateCell(mesh_view);
+                s++;
+                bool last_step_of_day = (kt + 1 == steps_per_day) || (s == n);
+                bool day_index_aligned = ((day + 1) % ntoutput_value == 0);
+                if (last_step_of_day && (day_index_aligned || s == n)) {
+                    CUDA_CHECK(cudaDeviceSynchronize());
+                    mesh_view.ToHost(mesh_data);
+                    mesh_data.outputToFile(day, kt + 1);
+                }
+            }
+        }
+    };
+
     // Save initial state for reset between runs
     std::vector<float> init_H, init_U, init_V, init_Z;
     saveState(init_H, init_U, init_V, init_Z);
 
     // ===== Dump mode =====
     if (do_dump) {
-        printf("Running %d steps and dumping to %s...\n", steps, dump_file.c_str());
-        runSteps(steps);
+        printf("Running %d steps and dumping to %s (with_output=%d, ntoutput=%d)...\n",
+               steps, dump_file.c_str(), with_output ? 1 : 0, ntoutput_value);
+        if (with_output) {
+            runStepsWithOutput(steps);
+        } else {
+            runSteps(steps);
+        }
         CUDA_CHECK(cudaDeviceSynchronize());
 
         mesh_view.ToHost(mesh_data);

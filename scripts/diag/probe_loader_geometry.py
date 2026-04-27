@@ -22,7 +22,9 @@ def main():
     import mesh_loader_f1 as mlf1
     import mesh_loader_f2 as mlf2
 
-    m1 = mlf1.load_hydro_mesh(mesh="20w")
+    # F1 loader now accepts a `dtype` kwarg (default fp64). Pass fp32 so the
+    # geometry math runs in fp32 and matches F2's fp32 output.
+    m1 = mlf1.load_hydro_mesh(mesh="20w", dtype=np.float32)
     m2 = mlf2.load_mesh(mesh="20w", dtype=np.float32)
 
     cel = m1["CEL"]

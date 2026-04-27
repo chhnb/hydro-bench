@@ -28,7 +28,9 @@ VMIN: ti.f32 = 0.001
 def run_real(steps=1, backend="cuda", mesh="default", fixed_dt=None):
     ti.init(arch=ti.cuda if backend == "cuda" else ti.cpu, default_fp=ti.f32, fast_math=False)
 
-    m = load_hydro_mesh(mesh=mesh)
+    # Compute geometry / state arrays in fp32 so they match native CUDA's
+    # ``Real = float`` ``preCalculate`` output bit-for-bit.
+    m = load_hydro_mesh(mesh=mesh, dtype=np.float32)
     CELL = m["CEL"]
     NE = 4 * CELL
     HM1 = float(m["HM1"])
@@ -490,7 +492,15 @@ def run_real(steps=1, backend="cuda", mesh="default", fixed_dt=None):
             W[i] = ti.sqrt(U2 * U2 + V2 * V2)
 
     steps_per_day = max(int(round(float(m.get("MDT", 3600)) / DT)), 1)
-    def step_fn():
+
+    def step_fn(on_step=None):
+        """Run the configured number of steps.
+
+        on_step: optional callable invoked as ``on_step(step_index)`` after
+            each step has been synced. The first completed step has
+            index 1. When omitted (default), the loop runs without
+            yielding control, preserving the existing all-at-once behavior.
+        """
         s = 0
         for day in range(int(m.get("NDAYS", 50))):
             for kt in range(1, steps_per_day):
@@ -499,6 +509,9 @@ def run_real(steps=1, backend="cuda", mesh="default", fixed_dt=None):
                 calculate_flux(kt, day)
                 update_cell()
                 s += 1
+                if on_step is not None:
+                    ti.sync()
+                    on_step(s)
 
     def sync_fn():
         ti.sync()
