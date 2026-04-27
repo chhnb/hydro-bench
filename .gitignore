@@ -51,3 +51,6 @@ results/*.txt
 
 # Tool stubs
 .codex
+
+# RLCR loop state (created by humanize:start-rlcr-loop)
+.humanize*
