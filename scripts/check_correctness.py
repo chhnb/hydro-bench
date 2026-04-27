@@ -402,6 +402,27 @@ def _per_field_stats(name, native_arr, taichi_arr, klas_edge=None, nac_edge=None
     return out
 
 
+def _kahan_sum(arr):
+    """Neumaier-Kahan compensated summation.
+
+    For an array of length N, naive ``sum`` accumulates O(N · eps)
+    relative error. Kahan-Neumaier reduces that to O(eps) regardless
+    of N. This matters for the cancellation-heavy conservation sums
+    (momentum, BC inflow) where the value floor is dominated by
+    summation noise rather than per-cell state divergence.
+    """
+    s = 0.0
+    c = 0.0
+    for x in arr:
+        t = s + x
+        if abs(s) >= abs(x):
+            c += (s - t) + x
+        else:
+            c += (x - t) + s
+        s = t
+    return float(s + c)
+
+
 def _conservation_metrics(state, area, klas_edge, side_edge):
     H = state["H"].astype(np.float64)
     U = state["U"].astype(np.float64)
@@ -416,15 +437,19 @@ def _conservation_metrics(state, area, klas_edge, side_edge):
     F0 = F0[:n_e]
     klas_e = klas_edge[:n_e]
     side_e = side_edge[:n_e]
-    mass = float((H * a).sum())
-    momx = float((H * U * a).sum())
-    momy = float((H * V * a).sum())
-    kin = float((0.5 * H * (U * U + V * V) * a).sum())
-    pot = float((0.5 * GRAVITY * H * H * a).sum())
+    # Use Kahan summation throughout so the calculator's own noise
+    # floor is O(eps), not O(N · eps). This separates pure-summation
+    # error from real per-cell state divergence between native and
+    # Taichi.
+    mass = _kahan_sum(H * a)
+    momx = _kahan_sum(H * U * a)
+    momy = _kahan_sum(H * V * a)
+    kin = _kahan_sum(0.5 * H * (U * U + V * V) * a)
+    pot = _kahan_sum(0.5 * GRAVITY * H * H * a)
     klas10_mask = klas_e == 10
     klas1_mask = klas_e == 1
-    klas10_inflow = float((F0 * side_e * klas10_mask).sum())
-    klas1_inflow = float((F0 * side_e * klas1_mask).sum())
+    klas10_inflow = _kahan_sum(F0 * side_e * klas10_mask)
+    klas1_inflow = _kahan_sum(F0 * side_e * klas1_mask)
     return {
         "mass": mass,
         "momentum_x": momx,
