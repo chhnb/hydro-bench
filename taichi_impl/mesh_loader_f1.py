@@ -305,6 +305,18 @@ def load_hydro_mesh(mesh="default", dtype=np.float64):
     K0 = int(MDT / DT) if DT > 0 else 1
 
     def _load_bounde_group(subdir_name, prefix):
+        """Read BOUNDE/{subdir}/{prefix}NNNN.DAT as (time, value) pairs.
+
+        Native parses each line via ``iss >> QZSTIME[i]; iss >> QZSTEMP[i]``
+        and runs ``BOUNDRYinterp(STIME1, ...)`` to linearly interpolate
+        between time stamps for each simulated day, holding the
+        endpoints beyond the file's range. The previous Taichi loader
+        treated the file's i-th data row as "value at day i", which
+        silently zero-fills (or holds-last-value) past the file's
+        index count when the file's TIME stamps actually span the full
+        simulation window. Replicate native's (time, value) reading so
+        callers can interpolate identically.
+        """
         bounde_dir = os.path.join(data_dir, "BOUNDE", subdir_name)
         out = {}
         if not os.path.isdir(bounde_dir):
@@ -316,7 +328,7 @@ def load_hydro_mesh(mesh="default", dtype=np.float64):
                 gid = int(fn[len(prefix):len(prefix)+4])
             except ValueError:
                 continue
-            vals = []
+            pairs = []
             with open(os.path.join(bounde_dir, fn), 'r', encoding='latin-1') as f:
                 first = True
                 for line in f:
@@ -330,14 +342,32 @@ def load_hydro_mesh(mesh="default", dtype=np.float64):
                     first = False
                     if len(parts) >= 2:
                         try:
-                            # Native stores BOUNDRYinterp output in a float
-                            # temporary even in the fp64 build.
-                            vals.append(float(np.float32(float(parts[1]))))
+                            pairs.append((float(parts[0]), float(parts[1])))
                         except ValueError:
                             continue
-            if vals:
-                out[gid] = vals
+            if pairs:
+                pairs.sort(key=lambda p: p[0])
+                out[gid] = pairs
         return out
+
+    def _interp_series(pairs, t):
+        """Native BOUNDRYinterp: linear interp between adjacent pairs,
+        hold the endpoints when ``t`` is beyond the time range."""
+        if not pairs:
+            return 0.0
+        if t <= pairs[0][0]:
+            return pairs[0][1]
+        if t >= pairs[-1][0]:
+            return pairs[-1][1]
+        for k in range(len(pairs) - 1):
+            t0, v0 = pairs[k]
+            t1, v1 = pairs[k + 1]
+            if t0 <= t <= t1:
+                if t1 == t0:
+                    return v0
+                return v0 + (v1 - v0) * (t - t0) / (t1 - t0)
+        return pairs[-1][1]
+
     def _read_mbx(filename):
         path = os.path.join(data_dir, filename)
         if not os.path.exists(path):
@@ -352,22 +382,19 @@ def load_hydro_mesh(mesh="default", dtype=np.float64):
                     continue
         return out
 
-    # KLAS=1: water level
+    # KLAS=1: water level. Time-interp pairs at fractional day index,
+    # then fp32-truncate to mirror native's ``float ZTTEMP`` cast.
     if NZ > 0:
         MBZ_cells = _read_mbx("MBZ.DAT")
         nz_data = _load_bounde_group("NZ", "NZ")
-        # group_size: how many cells share a group (Native divides timeseries value)
-        group_count_z = {}
-        for _, gid in MBZ_cells:
-            group_count_z[gid] = group_count_z.get(gid, 0) + 1
         for cell_0idx, group_id in MBZ_cells:
             if group_id in nz_data:
-                wl = nz_data[group_id]
+                pairs = nz_data[group_id]
                 for day in range(NDAYS):
-                    z_day = wl[min(day, len(wl) - 1)]
+                    z_day = float(np.float32(_interp_series(pairs, float(day))))
                     ZT[day * CEL + cell_0idx] = z_day
                     if day < NDAYS - 1 and K0 > 0:
-                        z_next = wl[min(day + 1, len(wl) - 1)]
+                        z_next = float(np.float32(_interp_series(pairs, float(day + 1))))
                         DZT[day * CEL + cell_0idx] = (z_next - z_day) / K0
 
     # KLAS=10: flow rate (per cell = Q_group / group_size, divided in native)
@@ -379,13 +406,13 @@ def load_hydro_mesh(mesh="default", dtype=np.float64):
             group_count_q[gid] = group_count_q.get(gid, 0) + 1
         for cell_0idx, group_id in MBQ_cells:
             if group_id in nq_data:
-                qs = nq_data[group_id]
+                pairs = nq_data[group_id]
                 kl = max(group_count_q.get(group_id, 1), 1)
                 for day in range(NDAYS):
-                    q_day = float(np.float32(np.float32(qs[min(day, len(qs) - 1)]) / np.float32(kl)))
+                    q_day = float(np.float32(np.float32(_interp_series(pairs, float(day))) / np.float32(kl)))
                     QT[day * CEL + cell_0idx] = q_day
                     if day < NDAYS - 1 and K0 > 0:
-                        q_next = float(np.float32(np.float32(qs[min(day + 1, len(qs) - 1)]) / np.float32(kl)))
+                        q_next = float(np.float32(np.float32(_interp_series(pairs, float(day + 1))) / np.float32(kl)))
                         DQT[day * CEL + cell_0idx] = (q_next - q_day) / K0
 
     return dict(
