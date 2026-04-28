@@ -332,7 +332,10 @@ class OutputWriter:
         u_clamped = np.where(wet, U, 0.0)
         v_clamped = np.where(wet, V, 0.0)
         z_clamped = np.where(wet, Z, self.zbc)
-        w2 = np.where(wet, np.sqrt(U * U + V * V), 0.0)
+        # Native writes W2 as ``float`` (mesh.cpp:715), so the
+        # fp32 truncation may flip 4-decimal rounding for values
+        # right at the half-way point. Mirror the cast here.
+        w2 = np.where(wet, np.sqrt(U * U + V * V).astype(np.float32).astype(np.float64), 0.0)
 
         jt2 = jt if kt == 1 else jt + 1
 

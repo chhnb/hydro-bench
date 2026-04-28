@@ -386,10 +386,20 @@ dt = float(mesh_dict.get('DT', 1.0))
 ndays = int(mesh_dict.get('NDAYS', 50))
 steps_per_day = max(int(round(mdt / dt)), 1)
 per_day = max(steps_per_day - 1, 1)
+# Alignment runs use NTOUTPUT=1 (every day) per the plan; native's
+# runStepsWithOutput cadence overrides TIME.DAT's value with --ntoutput
+# 1. Mirror that here so the Taichi writer produces the same frame set.
+ntoutput = 1
 
-# Pre-create per-checkpoint OutputWriters keyed by step. The initial
-# frame (jt=0, kt=1) is a one-time write and goes into every
-# checkpoint's output directory.
+# Pre-create per-checkpoint OutputWriters keyed by step. Each writer
+# accumulates the SAME native-frame-set up to its checkpoint:
+#   1. Initial frame at jt=0, kt=1.
+#   2. End-of-day frames at every step s where s % per_day == 0 and
+#      ((s/per_day) % NTOUTPUT == 0), for s < checkpoint.
+#   3. Final frame at the checkpoint step itself (with whatever
+#      (day, kt+1) that step lands on, even if mid-day).
+# This matches native's runStepsWithOutput exactly: native writes at
+# end-of-day plus a forced final-frame write when s == n.
 writers = {{}}
 if out_dir_base is not None:
     from output_writer import OutputWriter
@@ -411,19 +421,39 @@ def _dump_state(step_idx):
         f.write(struct.pack('i', arrs[0].size))
         for a in arrs:
             f.write(a.tobytes())
-    if step_idx in writers:
-        kt = ((step_idx - 1) % per_day) + 1
-        day = (step_idx - 1) // per_day
-        writer = writers[step_idx]
-        writer.write_frame(day, kt + 1, {{
-            'H': arrs[0], 'U': arrs[1], 'V': arrs[2], 'Z': arrs[3],
-        }})
-        writer.close()
 
 
 def on_step_cb(s):
-    if s in checkpoint_steps:
+    is_checkpoint = s in checkpoint_steps
+    is_eod = (s % per_day == 0) and (((s // per_day)) % ntoutput == 0)
+    if not (is_checkpoint or is_eod):
+        return
+    if is_checkpoint:
         _dump_state(s)
+    if not writers:
+        return
+    kt = ((s - 1) % per_day) + 1
+    day = (s - 1) // per_day
+    state_arrs = None
+    for cp in list(writers.keys()):
+        if s == cp:
+            # Final frame for this writer (whether or not also EOD).
+            if state_arrs is None:
+                state_arrs = {{
+                    'H': H.to_numpy(), 'U': U.to_numpy(),
+                    'V': V.to_numpy(), 'Z': Z.to_numpy(),
+                }}
+            writers[cp].write_frame(day, kt + 1, state_arrs)
+            writers[cp].close()
+            del writers[cp]
+        elif is_eod and s < cp:
+            # End-of-day frame for a writer whose checkpoint is later.
+            if state_arrs is None:
+                state_arrs = {{
+                    'H': H.to_numpy(), 'U': U.to_numpy(),
+                    'V': V.to_numpy(), 'Z': Z.to_numpy(),
+                }}
+            writers[cp].write_frame(day, kt + 1, state_arrs)
 
 
 step_fn(on_step=on_step_cb)
