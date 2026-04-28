@@ -28,7 +28,7 @@ REQUIRED_CONSERVATION = (
     "klas10_inflow", "klas1_inflow",
 )
 REQUIRED_THRESHOLD_KEYS = (
-    "diff_gt_1e-07", "diff_gt_1e-05", "diff_gt_1e-03", "diff_gt_1e-01",
+    "diff_gt_1e-13", "diff_gt_1e-11", "diff_gt_1e-09", "diff_gt_1e-07",
 )
 REQUIRED_PERCENTILE_KEYS = ("50", "90", "99", "99.9")
 REQUIRED_OUTPUT_FILES = (

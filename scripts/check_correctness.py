@@ -31,6 +31,7 @@ historical — boundary timeseries are loaded by the mesh loaders).
 import argparse
 import json
 import os
+import re
 import struct
 import subprocess
 import sys
@@ -318,6 +319,135 @@ print('TAICHI_DONE', flush=True)
     return _read_state_dump(bin_path, sz, has_geom_block=False)
 
 
+def dump_taichi_multi_step(case, steps, out_dir_base=None):
+    """Run Taichi ONCE per case and capture state at every requested step.
+
+    Uses the ``on_step(step_index)`` callback exposed by all four fp64
+    Taichi entry points to dump per-checkpoint state without restarting
+    the Taichi process. When ``out_dir_base`` is given, each checkpoint
+    also gets its own ``{out_dir_base}/{case}_step{N}/`` directory with
+    the five OUTPUT files (initial frame at jt=0,kt=1 plus the frame at
+    that step).
+
+    Returns ``{step: state_dict}`` covering exactly the requested
+    checkpoints (any missing entries indicate a Taichi failure).
+    """
+    sz = case_size(case)
+    case_kind = "F1" if case.startswith("F1") else "F2"
+    fp_kind = "fp64" if case.endswith("fp64") else "fp32"
+    mesh_name = "20w" if "207K" in case else "default"
+    max_step = max(steps)
+    pid = os.getpid()
+    bin_dir = os.path.join(NATIVE_DIR, f".taichi_multi_{case}_{pid}")
+    os.makedirs(bin_dir, exist_ok=True)
+    sorted_steps = sorted(set(int(s) for s in steps))
+    step_set_repr = repr(sorted_steps)
+    out_dir_base_repr = repr(out_dir_base) if out_dir_base is not None else "None"
+    case_repr = repr(case)
+
+    code = f"""
+import os, sys, struct
+import numpy as np
+sys.path.insert(0, {TAICHI_DIR!r})
+
+case_kind = {case_kind!r}
+fp_kind = {fp_kind!r}
+mesh_name = {mesh_name!r}
+checkpoint_steps = set({step_set_repr})
+max_step = {max_step}
+bin_dir = {bin_dir!r}
+case_name = {case_repr}
+out_dir_base = {out_dir_base_repr}
+
+if case_kind == 'F1':
+    if fp_kind == 'fp64':
+        from F1_hydro_taichi_2kernel_fp64 import run_real as run_case
+        from mesh_loader_f1 import load_hydro_mesh as load_mesh
+        mesh_dict = load_mesh(mesh=mesh_name, dtype=np.float64)
+    else:
+        from F1_hydro_taichi_2kernel_fp32 import run_real as run_case
+        from mesh_loader_f1 import load_hydro_mesh as load_mesh
+        mesh_dict = load_mesh(mesh=mesh_name, dtype=np.float32)
+    res = run_case(steps=max_step, backend='cuda', mesh=mesh_name)
+else:
+    if fp_kind == 'fp64':
+        from F2_hydro_taichi_fp64 import run as run_case
+        from mesh_loader_f2 import load_mesh
+        mesh_dict = load_mesh(mesh=mesh_name, dtype=np.float64)
+    else:
+        from F2_hydro_taichi_fp32 import run as run_case
+        from mesh_loader_f2 import load_mesh
+        mesh_dict = load_mesh(mesh=mesh_name, dtype=np.float32)
+    res = run_case(days=1, backend='cuda', mesh=mesh_name, steps=max_step)
+
+step_fn, sync_fn, H, U, V, Z, F0, F1, F2, F3 = res[:10]
+mdt = float(mesh_dict.get('MDT', 3600))
+dt = float(mesh_dict.get('DT', 1.0))
+ndays = int(mesh_dict.get('NDAYS', 50))
+steps_per_day = max(int(round(mdt / dt)), 1)
+per_day = max(steps_per_day - 1, 1)
+
+# Pre-create per-checkpoint OutputWriters keyed by step. The initial
+# frame (jt=0, kt=1) is a one-time write and goes into every
+# checkpoint's output directory.
+writers = {{}}
+if out_dir_base is not None:
+    from output_writer import OutputWriter
+    for s in checkpoint_steps:
+        d = os.path.join(out_dir_base, f"{{case_name}}_step{{s}}")
+        os.makedirs(d, exist_ok=True)
+        w = OutputWriter(d, mesh_dict, dt, ndays)
+        w.write_frame(0, 1, {{
+            'H': H.to_numpy(), 'U': U.to_numpy(),
+            'V': V.to_numpy(), 'Z': Z.to_numpy(),
+        }})
+        writers[s] = w
+
+
+def _dump_state(step_idx):
+    arrs = [a.to_numpy() for a in (H, U, V, Z, F0, F1, F2, F3)]
+    bin_path = os.path.join(bin_dir, f"step_{{step_idx}}.bin")
+    with open(bin_path, 'wb') as f:
+        f.write(struct.pack('i', arrs[0].size))
+        for a in arrs:
+            f.write(a.tobytes())
+    if step_idx in writers:
+        kt = ((step_idx - 1) % per_day) + 1
+        day = (step_idx - 1) // per_day
+        writer = writers[step_idx]
+        writer.write_frame(day, kt + 1, {{
+            'H': arrs[0], 'U': arrs[1], 'V': arrs[2], 'Z': arrs[3],
+        }})
+        writer.close()
+
+
+def on_step_cb(s):
+    if s in checkpoint_steps:
+        _dump_state(s)
+
+
+step_fn(on_step=on_step_cb)
+sync_fn()
+print('TAICHI_DONE', flush=True)
+"""
+    r = subprocess.run([PY, "-c", code], capture_output=True, text=True, timeout=3600)
+    if r.returncode != 0 or "TAICHI_DONE" not in r.stdout:
+        sys.stderr.write(f"  Taichi multi-step run FAILED for {case}: rc={r.returncode}\n")
+        sys.stderr.write(f"    stderr tail: {r.stderr[-800:]}\n")
+        return {}
+    states = {}
+    for s in sorted_steps:
+        bp = os.path.join(bin_dir, f"step_{s}.bin")
+        if os.path.isfile(bp):
+            states[s] = _read_state_dump(bp, sz, has_geom_block=False)
+            os.remove(bp)
+    try:
+        os.rmdir(bin_dir)
+    except OSError:
+        pass
+    return states
+
+
 # ---------------------------------------------------------------------------
 # Stats + conservation
 # ---------------------------------------------------------------------------
@@ -351,7 +481,7 @@ def _per_field_stats(name, native_arr, taichi_arr, klas_edge=None, nac_edge=None
     b_f = b[finite]
     diff = np.abs(a_f - b_f)
     pct = _percentile_in_dtype(diff)
-    counts = {f"diff_gt_{t:.0e}": int((diff > t).sum()) for t in (1e-7, 1e-5, 1e-3, 1e-1)}
+    counts = {f"diff_gt_{t:.0e}": int((diff > t).sum()) for t in (1e-13, 1e-11, 1e-9, 1e-7)}
     bit_exact_frac = float((diff == 0).sum()) / float(len(diff))
     out = {
         "max_abs": float(diff.max()),
@@ -557,11 +687,15 @@ def _verdict_for(case, step, field_stats, cons_diffs, health):
 # Main per-(case, step) evaluation
 # ---------------------------------------------------------------------------
 
-def _run_output_comparison(native_dir, taichi_dir):
-    """Invoke the OUTPUT comparator and adapt its result to verdict format."""
+def _run_output_comparison(native_dir, taichi_dir, diffs_dir=None):
+    """Invoke the OUTPUT comparator and adapt its result to verdict format.
+
+    When ``diffs_dir`` is given, the comparator also writes per-file
+    ``difflib.unified_diff`` artifacts to that directory.
+    """
     import compare_output_files as cmp_mod
 
-    report = cmp_mod.compare_dirs(native_dir, taichi_dir)
+    report = cmp_mod.compare_dirs(native_dir, taichi_dir, diffs_dir=diffs_dir)
     out = {}
     for fname, entry in report["files"].items():
         text = entry.get("text", {})
@@ -608,21 +742,33 @@ def evaluate_case(case, steps, out_dir):
     n_cells = int(len(area))
 
     rows = []
+    # Single Taichi run per case: on_step captures every requested
+    # checkpoint without restarting the Taichi process. Each checkpoint
+    # gets its own ``taichi_outputs/{case}_step{N}/`` directory written
+    # from inside the same run.
+    taichi_outputs_root = os.path.join(out_dir, "taichi_outputs")
     for step in steps:
-        print(f"  [step={step}] running independently from initial state ...", flush=True)
+        d = os.path.join(taichi_outputs_root, f"{case}_step{step}")
+        if os.path.isdir(d):
+            for fn in os.listdir(d):
+                p = os.path.join(d, fn)
+                if os.path.isfile(p):
+                    os.remove(p)
+    print(f"  Running Taichi once with on_step over checkpoints {steps} ...", flush=True)
+    taichi_states = dump_taichi_multi_step(case, steps, out_dir_base=taichi_outputs_root)
+
+    for step in steps:
+        print(f"  [step={step}] comparing against native ...", flush=True)
         native_out = os.path.join(out_dir, "native_outputs", f"{case}_step{step}")
-        taichi_out = os.path.join(out_dir, "taichi_outputs", f"{case}_step{step}")
-        # Clean any stale per-checkpoint directories so the comparator
-        # only sees this invocation's results.
-        for d in (native_out, taichi_out):
-            if os.path.isdir(d):
-                for fn in os.listdir(d):
-                    p = os.path.join(d, fn)
-                    if os.path.isfile(p):
-                        os.remove(p)
+        if os.path.isdir(native_out):
+            for fn in os.listdir(native_out):
+                p = os.path.join(native_out, fn)
+                if os.path.isfile(p):
+                    os.remove(p)
+        taichi_out = os.path.join(taichi_outputs_root, f"{case}_step{step}")
 
         native_state = dump_native_at_step(case, step, output_dir=native_out)
-        taichi_state = dump_taichi_at_step(case, step, output_dir=taichi_out)
+        taichi_state = taichi_states.get(step)
         if native_state is None or taichi_state is None:
             print(f"    SKIP — dump missing")
             continue
@@ -658,8 +804,10 @@ def evaluate_case(case, steps, out_dir):
 
         # OUTPUT-file comparator results (Taichi side wrote both initial
         # and final-step frames; native side wrote the same via
-        # `--with-output --ntoutput 1`).
-        output_block = _run_output_comparison(native_out, taichi_out)
+        # `--with-output --ntoutput 1`). Per-file unified diffs land in
+        # results/alignment/diffs/{case}_step{N}/ for inspection.
+        diffs_dir = os.path.join(out_dir, "diffs", f"{case}_step{step}")
+        output_block = _run_output_comparison(native_out, taichi_out, diffs_dir=diffs_dir)
         field_stats["_output"] = output_block
 
         verdict, reason = _verdict_for(case, step, field_stats, cons_diffs, health)
@@ -689,10 +837,12 @@ def evaluate_case(case, steps, out_dir):
 # ---------------------------------------------------------------------------
 
 _SUMMARY_HEADER = (
-    "| case | step | verdict | H max_abs | U max_abs | V max_abs | mass rel | KE rel | reason |"
+    "| case | step | precision | verdict | H max_abs | U max_abs | V max_abs | Z max_abs "
+    "| mass rel | KE rel | momentum_x rel | klas1_inflow rel | reason |"
 )
 _SUMMARY_DIVIDER = (
-    "|------|------|---------|-----------|-----------|-----------|----------|--------|--------|"
+    "|------|------|-----------|---------|-----------|-----------|-----------|-----------"
+    "|----------|--------|----------------|------------------|--------|"
 )
 
 
@@ -700,63 +850,78 @@ def _row_to_md(r):
     H = r["fields"]["H"]
     U = r["fields"]["U"]
     V = r["fields"]["V"]
-    mass = r["conservation"]["mass"]
-    ke = r["conservation"]["kinetic_energy"]
+    Z = r["fields"]["Z"]
+    cons = r["conservation"]
     return (
-        f"| {r['case']} | {r['step']} | {r['verdict']} | "
-        f"{H['max_abs']:.3e} | {U['max_abs']:.3e} | {V['max_abs']:.3e} | "
-        f"{mass['rel_diff']:.3e} | {ke['rel_diff']:.3e} | {r['reason']} |"
+        f"| {r['case']} | {r['step']} | {r.get('precision', '')} | {r['verdict']} | "
+        f"{H['max_abs']:.3e} | {U['max_abs']:.3e} | {V['max_abs']:.3e} | {Z['max_abs']:.3e} | "
+        f"{cons['mass']['rel_diff']:.3e} | {cons['kinetic_energy']['rel_diff']:.3e} | "
+        f"{cons['momentum_x']['rel_diff']:.3e} | {cons['klas1_inflow']['rel_diff']:.3e} | "
+        f"{r['reason']} |"
     )
 
 
-def _parse_existing_summary(summary_path):
-    """Parse pre-existing SUMMARY.md rows into a ``(case, step) -> markdown_line`` map.
+_JSON_NAME_RE = re.compile(r"^(?P<case>.+)_step(?P<step>\d+)\.json$")
 
-    Returns an empty dict if the file is missing or unparseable.
+
+def _scan_json_artifacts(out_dir):
+    """Read every ``{case}_step{N}.json`` file in ``out_dir``.
+
+    Returns a ``{(case, step): report_dict}`` map. Files that fail to
+    parse are skipped with a stderr warning so a single corrupt JSON
+    cannot block the rest of the summary.
     """
-    rows = {}
-    if not os.path.exists(summary_path):
-        return rows
-    with open(summary_path) as f:
-        for line in f:
-            line = line.rstrip("\n")
-            if not line.startswith("| ") or line.startswith("| case "):
-                continue
-            if line.startswith("|---"):
-                continue
-            parts = [p.strip() for p in line.split("|")]
-            # parts is [, case, step, verdict, ...]
-            if len(parts) < 4:
-                continue
-            try:
-                case = parts[1]
-                step = int(parts[2])
-            except (IndexError, ValueError):
-                continue
-            if case and case != "case":
-                rows[(case, step)] = line
-    return rows
+    found = {}
+    if not os.path.isdir(out_dir):
+        return found
+    for name in os.listdir(out_dir):
+        m = _JSON_NAME_RE.match(name)
+        if not m:
+            continue
+        path = os.path.join(out_dir, name)
+        try:
+            with open(path) as f:
+                report = json.load(f)
+        except (OSError, json.JSONDecodeError) as exc:
+            sys.stderr.write(f"  WARN: could not load {path}: {exc}\n")
+            continue
+        case = report.get("case") or m.group("case")
+        step = int(report.get("step", m.group("step")))
+        found[(case, step)] = report
+    return found
 
 
 def write_summary_md(rows, out_dir):
-    """Merge ``rows`` (from this invocation) with prior SUMMARY.md rows.
+    """Rebuild SUMMARY.md authoritatively from JSON artifacts on disk.
 
-    Earlier per-(case, step) entries are preserved; rows from this run
-    overwrite any matching keys. The merged table is rewritten in
-    sorted (case, step) order.
+    Rows from this invocation overwrite their JSON files first; the
+    summary is then assembled by scanning every ``{case}_step{N}.json``
+    actually present in ``out_dir``. Stale rows whose JSONs were deleted
+    are dropped — the SUMMARY.md is a faithful index of on-disk JSONs.
     """
     summary_path = os.path.join(out_dir, "SUMMARY.md")
-    existing = _parse_existing_summary(summary_path)
-    for r in rows:
-        existing[(r["case"], r["step"])] = _row_to_md(r)
-    if not existing:
+    artifacts = _scan_json_artifacts(out_dir)
+    # Reports from this invocation are already on disk (written before
+    # write_summary_md is called), so artifacts already includes them.
+    # The ``rows`` argument is kept for backwards compatibility with
+    # callers that pass the in-memory list, but is intentionally
+    # unused — disk is the source of truth.
+    _ = rows
+    if not artifacts:
+        # Empty out_dir: rewrite an empty (header-only) summary so a
+        # subsequent inspector sees an authoritative blank table rather
+        # than a stale one.
+        body = ["# Alignment Validation Summary", "", _SUMMARY_HEADER, _SUMMARY_DIVIDER]
+        with open(summary_path, "w") as f:
+            f.write("\n".join(body) + "\n")
+        print(f"\nSummary written to {summary_path} (0 rows — no JSON artifacts found)")
         return
     body = ["# Alignment Validation Summary", "", _SUMMARY_HEADER, _SUMMARY_DIVIDER]
-    for key in sorted(existing):
-        body.append(existing[key])
+    for key in sorted(artifacts):
+        body.append(_row_to_md(artifacts[key]))
     with open(summary_path, "w") as f:
         f.write("\n".join(body) + "\n")
-    print(f"\nSummary written to {summary_path} ({len(existing)} merged rows)")
+    print(f"\nSummary written to {summary_path} ({len(artifacts)} rows)")
 
 
 # ---------------------------------------------------------------------------
