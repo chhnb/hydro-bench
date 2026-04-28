@@ -27,10 +27,22 @@ CASES="${CASES:-F1_6.7K_fp64 F1_6.7K_fp32 F2_24K_fp64 F2_24K_fp32 F1_207K_fp64 F
 OUT_DIR="results/alignment"
 mkdir -p "$OUT_DIR"
 
-# Clear stale per-(case, step) JSONs and SUMMARY.md so the aggregator
-# only sees results from this invocation.
-rm -f "$OUT_DIR"/*_step*.json "$OUT_DIR/SUMMARY.md"
-rm -rf "$OUT_DIR/native_outputs" "$OUT_DIR/taichi_outputs"
+# Clear ONLY the (case, step) artifacts this invocation will rewrite.
+# Other (case, step) JSONs in OUT_DIR survive so partial reruns merge
+# into SUMMARY.md instead of erasing unrelated rows. Per-checkpoint
+# native_outputs/ and taichi_outputs/ are cleared with the same scope.
+IFS=',' read -r -a STEP_ARR <<< "$STEPS"
+for case in $CASES; do
+    for step in "${STEP_ARR[@]}"; do
+        step=$(echo "$step" | tr -d ' ')
+        rm -f "$OUT_DIR/${case}_step${step}.json"
+        rm -rf "$OUT_DIR/native_outputs/${case}_step${step}"
+        rm -rf "$OUT_DIR/taichi_outputs/${case}_step${step}"
+    done
+done
+# SUMMARY.md is rewritten at end-of-run by the aggregator below; do NOT
+# delete it here, the per-case Python script merges into the existing
+# table.
 
 n_pass=0
 n_fail=0

@@ -127,6 +127,15 @@ def diff_blocks(native, taichi):
             if n == 0:
                 continue
             diff = np.abs(a - b)
+            if label == "FI":
+                # Native's `FI()` branches on the strict sign of U*V, so
+                # cells with U and V at fp64 arithmetic-noise magnitudes
+                # (~1e-17) can produce 180-360 degree FI diffs that are
+                # not physically meaningful. Wrap diffs around the 360
+                # degree (≈2π·57.298 = 360.054) period so the report
+                # captures the true angular distance, not the wrap.
+                period = 360.054
+                diff = np.minimum(diff, np.abs(diff - period))
             entry[key_name] = float(diff.max())
             entry["n_values"] = max(entry["n_values"], int(n))
         out[f"frame{frame}"] = entry

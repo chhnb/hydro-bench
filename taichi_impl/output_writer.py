@@ -91,7 +91,17 @@ def _write_block_10x100(stream, cell_values):
 
 
 def _flow_angle(u, v):
-    """Replicate native ``MeshData::FI``. Result in degrees scaled by 57.298."""
+    """Replicate native ``MeshData::FI``. Result in degrees scaled by 57.298.
+
+    Note on sub-ulp U/V noise: native's `FI()` branches on the strict
+    sign of U*V, so two implementations that agree at the
+    cell-physics level can disagree by 180-360 degrees on cells whose
+    U and V have arithmetic-noise magnitudes (~1e-17). The writer
+    must mirror native exactly here; sub-ulp-driven FI mismatches
+    show up as `max_fi_diff` in the comparator, where the
+    normalisation logic in `compare_output_files.py` is responsible
+    for distinguishing physically-meaningful FI diffs from noise.
+    """
     MPI = 3.1416
     if u * v != 0.0:
         w = math.atan2(abs(v), abs(u))
