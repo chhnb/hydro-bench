@@ -52,6 +52,11 @@ results/alignment/diffs/
 *.swp
 *.swo
 .DS_Store
+
+# NFS sillyrename artifacts (created when an NFS-backed file is unlinked
+# while still open by another process); they disappear on their own and
+# should never be tracked.
+**/.nfs*
 /venv
 
 # Tool stubs
