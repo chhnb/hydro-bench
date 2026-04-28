@@ -43,6 +43,7 @@ results/alignment/*.json
 results/alignment/SUMMARY.md
 results/alignment/native_outputs/
 results/alignment/taichi_outputs/
+results/alignment/diffs/
 !results/.gitkeep
 
 # Editor / OS
