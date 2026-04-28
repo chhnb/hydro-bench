@@ -860,10 +860,13 @@ def evaluate_case(case, steps, out_dir):
         native_state = dump_native_at_step(case, step, output_dir=native_out)
         taichi_state = taichi_states.get(step)
         if native_state is None or taichi_state is None:
-            # Per Codex review (round 2): silent-skip lets a partial
+            # Per Codex review (round 2/3): silent-skip lets a partial
             # matrix masquerade as completed. Emit an explicit FAIL
-            # row and a placeholder JSON so SUMMARY.md surfaces the
-            # missing artifact instead of dropping it.
+            # row plus a placeholder JSON whose schema is identical to
+            # a normal report (every required block present, every
+            # required key populated with default-FAIL stats), so
+            # validate_alignment_json.py still passes on a missing-
+            # artifact report.
             missing = []
             if native_state is None:
                 missing.append("native")
@@ -871,13 +874,39 @@ def evaluate_case(case, steps, out_dir):
                 missing.append("taichi")
             reason = f"dump missing on side(s): {','.join(missing)}"
             print(f"    -> FAIL: {reason}")
+            field_placeholder = {
+                "max_abs": float("inf"),
+                "mean_abs": float("inf"),
+                "percentiles": {"50": float("inf"), "90": float("inf"),
+                                "99": float("inf"), "99.9": float("inf")},
+                "threshold_counts": {"diff_gt_1e-13": 0, "diff_gt_1e-11": 0,
+                                     "diff_gt_1e-09": 0, "diff_gt_1e-07": 0},
+                "bit_exact_frac": 0.0,
+                "n_finite": 0,
+                "n_total": 0,
+                "worst_cells": [],
+                "all_nonfinite": True,
+            }
+            output_file_placeholder = {
+                "text_match": False,
+                "lines_match_frac": 0.0,
+                "max_h_diff": float("inf"),
+                "max_u_diff": float("inf"),
+                "max_v_diff": float("inf"),
+                "max_z_diff": float("inf"),
+                "max_w_diff": float("inf"),
+                "max_fi_diff": float("inf"),
+                "structural_mismatch": [reason],
+            }
             placeholder = {
                 "case": case,
                 "step": step,
                 "precision": case_precision(case),
-                "fields": {f: {"max_abs": float("inf"), "all_nonfinite": True}
+                "fields": {f: dict(field_placeholder)
                            for f in ("H", "U", "V", "Z", "W", "F0", "F1", "F2", "F3")},
-                "output_files": {},
+                "output_files": {fname: dict(output_file_placeholder)
+                                 for fname in ("H2U2V2.OUT", "ZUV.OUT", "SIDE.OUT",
+                                               "XY-TEC.DAT", "TIMELOG.OUT")},
                 "conservation": {k: {"native": float("nan"), "taichi": float("nan"),
                                      "abs_diff": float("inf"), "rel_diff": float("inf")}
                                  for k in ("mass", "momentum_x", "momentum_y",
