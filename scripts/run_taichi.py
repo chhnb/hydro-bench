@@ -60,16 +60,15 @@ def main():
     # Warmup
     step_fn()
     sync_fn()
-    import torch
-    torch.cuda.synchronize()
+    ti.sync()
 
     # Time 10 runs, take median of 5
     times = []
     for _ in range(10):
-        torch.cuda.synchronize()
+        ti.sync()
         t0 = time.perf_counter()
         step_fn()
-        torch.cuda.synchronize()
+        ti.sync()
         t1 = time.perf_counter()
         times.append((t1 - t0) * 1e6 / steps)
     times.sort()

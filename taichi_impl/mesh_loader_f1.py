@@ -350,23 +350,17 @@ def load_hydro_mesh(mesh="default", dtype=np.float64):
                 out[gid] = pairs
         return out
 
-    def _interp_series(pairs, t):
-        """Native BOUNDRYinterp: linear interp between adjacent pairs,
-        hold the endpoints when ``t`` is beyond the time range."""
+    def _interp_per_day(pairs, ndays):
+        """Vectorized BOUNDRYinterp: linear interp at every day index,
+        clamped to endpoints. Returns an fp64 ndarray of length ``ndays``.
+        Equivalent to ``[_interp_series(pairs, day) for day in range(ndays)]``
+        but O(ndays + len(pairs)) instead of O(ndays * len(pairs))."""
         if not pairs:
-            return 0.0
-        if t <= pairs[0][0]:
-            return pairs[0][1]
-        if t >= pairs[-1][0]:
-            return pairs[-1][1]
-        for k in range(len(pairs) - 1):
-            t0, v0 = pairs[k]
-            t1, v1 = pairs[k + 1]
-            if t0 <= t <= t1:
-                if t1 == t0:
-                    return v0
-                return v0 + (v1 - v0) * (t - t0) / (t1 - t0)
-        return pairs[-1][1]
+            return np.zeros(ndays, dtype=np.float64)
+        xp = np.array([p[0] for p in pairs], dtype=np.float64)
+        fp = np.array([p[1] for p in pairs], dtype=np.float64)
+        days_arr = np.arange(ndays, dtype=np.float64)
+        return np.interp(days_arr, xp, fp)
 
     def _read_mbx(filename):
         path = os.path.join(data_dir, filename)
@@ -387,15 +381,16 @@ def load_hydro_mesh(mesh="default", dtype=np.float64):
     if NZ > 0:
         MBZ_cells = _read_mbx("MBZ.DAT")
         nz_data = _load_bounde_group("NZ", "NZ")
+        nz_per_day = {gid: _interp_per_day(pairs, NDAYS).astype(np.float32).astype(np.float64)
+                      for gid, pairs in nz_data.items()}
         for cell_0idx, group_id in MBZ_cells:
-            if group_id in nz_data:
-                pairs = nz_data[group_id]
-                for day in range(NDAYS):
-                    z_day = float(np.float32(_interp_series(pairs, float(day))))
-                    ZT[day * CEL + cell_0idx] = z_day
-                    if day < NDAYS - 1 and K0 > 0:
-                        z_next = float(np.float32(_interp_series(pairs, float(day + 1))))
-                        DZT[day * CEL + cell_0idx] = (z_next - z_day) / K0
+            if group_id in nz_per_day:
+                z = nz_per_day[group_id]
+                base_idx = np.arange(NDAYS) * CEL + cell_0idx
+                ZT[base_idx] = z
+                if K0 > 0 and NDAYS > 1:
+                    dzt_base = np.arange(NDAYS - 1) * CEL + cell_0idx
+                    DZT[dzt_base] = (z[1:] - z[:-1]) / K0
 
     # KLAS=10: flow rate (per cell = Q_group / group_size, divided in native)
     if NQ > 0:
@@ -404,16 +399,17 @@ def load_hydro_mesh(mesh="default", dtype=np.float64):
         group_count_q = {}
         for _, gid in MBQ_cells:
             group_count_q[gid] = group_count_q.get(gid, 0) + 1
+        nq_per_day_f32 = {gid: _interp_per_day(pairs, NDAYS).astype(np.float32)
+                          for gid, pairs in nq_data.items()}
         for cell_0idx, group_id in MBQ_cells:
-            if group_id in nq_data:
-                pairs = nq_data[group_id]
+            if group_id in nq_per_day_f32:
                 kl = max(group_count_q.get(group_id, 1), 1)
-                for day in range(NDAYS):
-                    q_day = float(np.float32(np.float32(_interp_series(pairs, float(day))) / np.float32(kl)))
-                    QT[day * CEL + cell_0idx] = q_day
-                    if day < NDAYS - 1 and K0 > 0:
-                        q_next = float(np.float32(np.float32(_interp_series(pairs, float(day + 1))) / np.float32(kl)))
-                        DQT[day * CEL + cell_0idx] = (q_next - q_day) / K0
+                q = (nq_per_day_f32[group_id] / np.float32(kl)).astype(np.float32).astype(np.float64)
+                base_idx = np.arange(NDAYS) * CEL + cell_0idx
+                QT[base_idx] = q
+                if K0 > 0 and NDAYS > 1:
+                    dqt_base = np.arange(NDAYS - 1) * CEL + cell_0idx
+                    DQT[dqt_base] = (q[1:] - q[:-1]) / K0
 
     return dict(
         CEL=CEL, NOD=NOD, HM1=HM1, HM2=HM2, NZ=NZ, NQ=NQ, DT=DT,

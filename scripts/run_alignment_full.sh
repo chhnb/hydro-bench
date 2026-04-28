@@ -16,8 +16,8 @@
 set -u
 cd "$(dirname "$0")/.."
 
-PY="$(realpath ./venv/bin/python 2>/dev/null || true)"
-if [ -z "$PY" ] || [ ! -x "$PY" ]; then
+PY="$(pwd)/venv/bin/python"
+if [ ! -x "$PY" ]; then
     PY="/home/scratch.huanhuanc_gpu/spmd/spmd-venv/bin/python"
 fi
 

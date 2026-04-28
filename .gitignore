@@ -36,7 +36,9 @@ cuda_native_impl/*_native_data/
 **/native_dump*.bin
 *.bin
 
-# Test outputs
+# Test outputs — block raw per-(case, step) artifacts and bulky frame
+# dumps; allow the curated summary text + NCU jsonl to be tracked so a
+# reader can reproduce the headline numbers without re-running the matrix.
 results/*.jsonl
 results/*.txt
 results/alignment/*.json
@@ -45,6 +47,10 @@ results/alignment/native_outputs/
 results/alignment/taichi_outputs/
 results/alignment/diffs/
 !results/.gitkeep
+!results/performance_8case_summary.txt
+!results/correctness_8case_summary.txt
+!results/ncu_results.jsonl
+!results/alignment/SUMMARY.md
 
 # Editor / OS
 .vscode/
@@ -64,3 +70,4 @@ results/alignment/diffs/
 
 # RLCR loop state (created by humanize:start-rlcr-loop)
 .humanize*
+.local_venv/

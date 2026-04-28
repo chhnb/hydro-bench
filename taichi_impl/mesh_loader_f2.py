@@ -308,38 +308,29 @@ def load_mesh(mesh="default", dtype=np.float32):
                     pairs.sort(key=lambda p: p[0])
                     nz_data[gid] = pairs
 
-        def _interp_series(pairs, t):
-            """Match native BOUNDRYinterp: linear interp, hold endpoints."""
-            if not pairs:
-                return 0.0
-            if t <= pairs[0][0]:
-                return pairs[0][1]
-            if t >= pairs[-1][0]:
-                return pairs[-1][1]
-            for k in range(len(pairs) - 1):
-                t0, v0 = pairs[k]
-                t1, v1 = pairs[k + 1]
-                if t0 <= t <= t1:
-                    if t1 == t0:
-                        return v0
-                    return v0 + (v1 - v0) * (t - t0) / (t1 - t0)
-            return pairs[-1][1]
+        # Vectorized BOUNDRYinterp per group: precompute the per-day
+        # interpolated series once (with fp32 truncation matching native's
+        # `float ZTTEMP` cast), then scatter to all cells in the group.
+        # Avoids the O(NDAYS * pairs) Python linear search that made
+        # F2_24K (NDAYS=2000, ~19k pairs/group) effectively hang.
+        days_arr = np.arange(NDAYS, dtype=np.float64)
+        nz_per_day = {}
+        for gid, pairs in nz_data.items():
+            xp = np.array([p[0] for p in pairs], dtype=np.float64)
+            fp = np.array([p[1] for p in pairs], dtype=np.float64)
+            # np.interp holds endpoints (left=fp[0], right=fp[-1]) by
+            # default, matching native BOUNDRYinterp's clamp behavior.
+            z = np.interp(days_arr, xp, fp).astype(np.float32).astype(np.float64)
+            nz_per_day[gid] = z
 
-        # Build ZT and DZT [NDAYS * CELL] by interpolating each day's
-        # (time-stamp = day index) against the (time, level) pairs.
-        # Native stores BOUNDRYinterp's result in a ``float ZTTEMP``
-        # local before assigning to the fp64 ZT[j][i] (mesh.cpp:405),
-        # which fp32-truncates each value. Mirror that truncation so
-        # Taichi's ZT matches native byte-for-byte.
         for cell_0idx, group_id in MBZ_cells:
-            if group_id in nz_data:
-                pairs = nz_data[group_id]
-                for day in range(NDAYS):
-                    z_today = float(np.float32(_interp_series(pairs, float(day))))
-                    ZT[day * CELL + cell_0idx] = z_today
-                    if day < NDAYS - 1 and K0 > 0:
-                        z_tomorrow = float(np.float32(_interp_series(pairs, float(day + 1))))
-                        DZT[day * CELL + cell_0idx] = (z_tomorrow - z_today) / K0
+            if group_id in nz_per_day:
+                z = nz_per_day[group_id]
+                base_idx = np.arange(NDAYS) * CELL + cell_0idx
+                ZT[base_idx] = z
+                if K0 > 0 and NDAYS > 1:
+                    dzt_base = np.arange(NDAYS - 1) * CELL + cell_0idx
+                    DZT[dzt_base] = (z[1:] - z[:-1]) / K0
 
     # ---- MBQ.DAT: flow boundary cells (KLAS=10) ----
     lines_mbq = rd("MBQ.DAT")
@@ -397,18 +388,27 @@ def load_mesh(mesh="default", dtype=np.float32):
                 if pairs:
                     pairs.sort(key=lambda p: p[0])
                     nq_data[gid] = pairs
+        # Same vectorization pattern as ZT/NZ above. The native code
+        # divides BOUNDRYinterp's fp32 output by group size in fp32
+        # before storing, so the per-day per-group series is precomputed
+        # in fp32 and then scattered to each cell in the group.
+        days_arr = np.arange(NDAYS, dtype=np.float64)
+        nq_per_day = {}
+        for gid, pairs in nq_data.items():
+            xp = np.array([p[0] for p in pairs], dtype=np.float64)
+            fp = np.array([p[1] for p in pairs], dtype=np.float64)
+            q_full = np.interp(days_arr, xp, fp).astype(np.float32)
+            nq_per_day[gid] = q_full
+
         for cell_0idx, group_id in MBQ_cells:
-            if group_id in nq_data:
-                pairs = nq_data[group_id]
+            if group_id in nq_per_day:
                 kl = max(group_count_q.get(group_id, 1), 1)
-                for day in range(NDAYS):
-                    q_today = np.float32(
-                        np.float32(_interp_series(pairs, float(day))) / np.float32(kl))
-                    QT[day * CELL + cell_0idx] = q_today
-                    if day < NDAYS - 1 and K0 > 0:
-                        q_tomorrow = np.float32(
-                            np.float32(_interp_series(pairs, float(day + 1))) / np.float32(kl))
-                        DQT[day * CELL + cell_0idx] = (q_tomorrow - q_today) / K0
+                q = (nq_per_day[group_id] / np.float32(kl)).astype(np.float32).astype(np.float64)
+                base_idx = np.arange(NDAYS) * CELL + cell_0idx
+                QT[base_idx] = q
+                if K0 > 0 and NDAYS > 1:
+                    dqt_base = np.arange(NDAYS - 1) * CELL + cell_0idx
+                    DQT[dqt_base] = (q[1:] - q[:-1]) / K0
 
     steps_per_day = int(MDT / DT)
 
