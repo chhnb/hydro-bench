@@ -1065,17 +1065,33 @@ def write_summary_md(rows, out_dir):
         # Empty out_dir: rewrite an empty (header-only) summary so a
         # subsequent inspector sees an authoritative blank table rather
         # than a stale one.
-        body = ["# Alignment Validation Summary", "", _SUMMARY_HEADER, _SUMMARY_DIVIDER]
+        body = [
+            "# Alignment Validation Summary",
+            "",
+            "**0 PASS / 0 FAIL of 0 entries.**",
+            "",
+            _SUMMARY_HEADER,
+            _SUMMARY_DIVIDER,
+        ]
         with open(summary_path, "w") as f:
             f.write("\n".join(body) + "\n")
         print(f"\nSummary written to {summary_path} (0 rows — no JSON artifacts found)")
         return
-    body = ["# Alignment Validation Summary", "", _SUMMARY_HEADER, _SUMMARY_DIVIDER]
+    n_pass = sum(1 for k in artifacts if artifacts[k].get("verdict") == "PASS")
+    n_fail = len(artifacts) - n_pass
+    body = [
+        "# Alignment Validation Summary",
+        "",
+        f"**{n_pass} PASS / {n_fail} FAIL of {len(artifacts)} entries.**",
+        "",
+        _SUMMARY_HEADER,
+        _SUMMARY_DIVIDER,
+    ]
     for key in sorted(artifacts):
         body.append(_row_to_md(artifacts[key]))
     with open(summary_path, "w") as f:
         f.write("\n".join(body) + "\n")
-    print(f"\nSummary written to {summary_path} ({len(artifacts)} rows)")
+    print(f"\nSummary written to {summary_path} ({len(artifacts)} rows: {n_pass} PASS / {n_fail} FAIL)")
 
 
 # ---------------------------------------------------------------------------
