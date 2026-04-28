@@ -21,6 +21,31 @@ MESH_DATASETS = {
 }
 
 
+def _boundary_interp(t_query, xp, fp):
+    """Mirror native ``MeshData::BOUNDRYinterp`` (mesh.cpp:523-533).
+
+    Linear interpolation through the (xp, fp) pairs. Native returns 0 when the
+    query is outside [xp[0], xp[-1]]; np.interp would clamp to fp[0]/fp[-1],
+    which silently diverges from native on data sets where the BC table does
+    not bracket the simulation window. Use this helper to keep Taichi
+    bit-for-bit aligned with native semantics.
+    """
+    t_query = np.asarray(t_query, dtype=np.float64)
+    xp = np.asarray(xp, dtype=np.float64)
+    fp = np.asarray(fp, dtype=np.float64)
+    out = np.zeros_like(t_query)
+    if xp.size < 2:
+        return out
+    in_range = (t_query >= xp[0]) & (t_query <= xp[-1])
+    if not np.any(in_range):
+        return out
+    idx = np.searchsorted(xp, t_query, side='right') - 1
+    idx = np.clip(idx, 0, xp.size - 2)
+    i = idx[in_range]
+    out[in_range] = fp[i] + (fp[i + 1] - fp[i]) / (xp[i + 1] - xp[i]) * (t_query[in_range] - xp[i])
+    return out
+
+
 def _read_lines(filename, data_dir=None):
     """Read non-empty, non-comment lines from a data file."""
     path = os.path.join(data_dir or DATA_DIR, filename)
@@ -96,6 +121,8 @@ def load_mesh(mesh="default", dtype=np.float32):
     NQ = int(lines[1].split()[0])
     NZQ = int(lines[2].split()[0]) if len(lines) > 2 else 0
     NHQ = int(lines[3].split()[0]) if len(lines) > 3 else 5
+    NWE = int(lines[4].split()[0]) if len(lines) > 4 else 0
+    NDI = int(lines[5].split()[0]) if len(lines) > 5 else 0
 
     # ---- PXY.DAT: node coordinates ----
     lines = rd("PXY.DAT")
@@ -246,6 +273,9 @@ def load_mesh(mesh="default", dtype=np.float32):
     QT = np.zeros(NDAYS * CELL, dtype=dtype)
     DQT = np.zeros(NDAYS * CELL, dtype=dtype)
     BoundaryFeature = np.zeros(CELL, dtype=dtype)
+    NHQ1 = np.zeros(CELL, dtype=np.int32)
+    ZW = np.zeros(max(CELL * NHQ, 1), dtype=dtype)
+    QW = np.zeros(max(CELL * NHQ, 1), dtype=dtype)
 
     K0 = int(MDT / DT)  # steps per day
 
@@ -313,14 +343,19 @@ def load_mesh(mesh="default", dtype=np.float32):
         # `float ZTTEMP` cast), then scatter to all cells in the group.
         # Avoids the O(NDAYS * pairs) Python linear search that made
         # F2_24K (NDAYS=2000, ~19k pairs/group) effectively hang.
-        days_arr = np.arange(NDAYS, dtype=np.float64)
+        # Native mesh.cpp:407 computes STIME1 = i / (24*3600/MDT) = i*MDT/86400
+        # in fp32, so the time axis is in *days* with MDT-step granularity, not
+        # plain day index. For F2_207K (MDT=3600), step i is i/24 day = i hour.
+        days_arr = (np.arange(NDAYS, dtype=np.float64) * (MDT / 86400.0)).astype(np.float32).astype(np.float64)
         nz_per_day = {}
         for gid, pairs in nz_data.items():
             xp = np.array([p[0] for p in pairs], dtype=np.float64)
             fp = np.array([p[1] for p in pairs], dtype=np.float64)
-            # np.interp holds endpoints (left=fp[0], right=fp[-1]) by
-            # default, matching native BOUNDRYinterp's clamp behavior.
-            z = np.interp(days_arr, xp, fp).astype(np.float32).astype(np.float64)
+            # _boundary_interp mirrors native BOUNDRYinterp: 0 outside range
+            # (mesh.cpp:523-533). Earlier the loader used np.interp which holds
+            # endpoints; that diverges from native when the BC table does not
+            # bracket the simulation window.
+            z = _boundary_interp(days_arr, xp, fp).astype(np.float32).astype(np.float64)
             nz_per_day[gid] = z
 
         for cell_0idx, group_id in MBZ_cells:
@@ -392,12 +427,14 @@ def load_mesh(mesh="default", dtype=np.float32):
         # divides BOUNDRYinterp's fp32 output by group size in fp32
         # before storing, so the per-day per-group series is precomputed
         # in fp32 and then scattered to each cell in the group.
-        days_arr = np.arange(NDAYS, dtype=np.float64)
+        # Time axis is i*MDT/86400 in fp32 (mesh.cpp:444), not plain day index.
+        days_arr = (np.arange(NDAYS, dtype=np.float64) * (MDT / 86400.0)).astype(np.float32).astype(np.float64)
         nq_per_day = {}
         for gid, pairs in nq_data.items():
             xp = np.array([p[0] for p in pairs], dtype=np.float64)
             fp = np.array([p[1] for p in pairs], dtype=np.float64)
-            q_full = np.interp(days_arr, xp, fp).astype(np.float32)
+            # See _boundary_interp note above: native returns 0 outside table.
+            q_full = _boundary_interp(days_arr, xp, fp).astype(np.float32)
             nq_per_day[gid] = q_full
 
         for cell_0idx, group_id in MBQ_cells:
@@ -410,12 +447,100 @@ def load_mesh(mesh="default", dtype=np.float32):
                     dqt_base = np.arange(NDAYS - 1) * CELL + cell_0idx
                     DQT[dqt_base] = (q[1:] - q[:-1]) / K0
 
+    # ---- MBW.DAT: weir top elevation for KLAS=6 ----
+    # Native CellView::FromHost currently maps TOPW into BoundaryFeature.
+    # TOPD/MDI for KLAS=7 is intentionally not mapped in native (TODO
+    # there), so it remains zero here as well.
+    if NWE > 0 and os.path.exists(os.path.join(data_dir, "MBW.DAT")):
+        lines_mbw = rd("MBW.DAT")
+        for line in lines_mbw[1:]:
+            parts = line.split()
+            if len(parts) >= 3:
+                try:
+                    cell_id = int(parts[1])
+                    topw = float(parts[2])
+                except ValueError:
+                    continue
+                if 1 <= cell_id <= CELL:
+                    BoundaryFeature[cell_id - 1] = topw
+
+    # ---- MBZQ.DAT + BOUNDE/NZQ: rating-curve data for KLAS=3 ----
+    if NZQ > 0 and NHQ > 0 and os.path.exists(os.path.join(data_dir, "MBZQ.DAT")):
+        lines_mbzq = rd("MBZQ.DAT")
+        NNZQ0 = int(lines_mbzq[0].split()[0]) if lines_mbzq else 0
+        MBZQ = np.zeros(NZQ, dtype=np.int32)
+        NNZQ = np.zeros(NZQ, dtype=np.int32)
+        row = 0
+        for line in lines_mbzq[1:]:
+            parts = line.split()
+            if len(parts) >= 3 and row < NZQ:
+                try:
+                    MBZQ[row] = int(parts[1])
+                    NNZQ[row] = int(parts[2])
+                    row += 1
+                except ValueError:
+                    continue
+
+        nzq_dir = os.path.join(data_dir, "BOUNDE", "NZQ")
+        for group_id in range(1, NNZQ0 + 1):
+            nzq_file = os.path.join(nzq_dir, f"NZQ{group_id:04d}.DAT")
+            if not os.path.exists(nzq_file):
+                continue
+            rows = []
+            with open(nzq_file, "r", encoding="latin-1") as f:
+                for raw in f:
+                    s = raw.strip()
+                    if s:
+                        rows.append(s)
+            if not rows:
+                continue
+            try:
+                nhq_temp = min(int(rows[0].split()[0]), NHQ)
+            except ValueError:
+                continue
+
+            group_rows = np.where(NNZQ == group_id)[0]
+            for i in range(nhq_temp):
+                if i + 1 >= len(rows):
+                    break
+                parts = rows[i + 1].split()
+                if len(parts) < 2:
+                    continue
+                try:
+                    zq = float(parts[0])
+                    qq = float(parts[1])
+                except ValueError:
+                    continue
+
+                aqzh0 = np.zeros(NZQ, dtype=np.float64)
+                aqzh1 = 0.0
+                for j in group_rows:
+                    cell_0idx = int(MBZQ[j]) - 1
+                    if cell_0idx < 0 or cell_0idx >= CELL:
+                        continue
+                    NHQ1[cell_0idx] = nhq_temp
+                    for jj in range(4):
+                        edge_idx = cell_0idx * 4 + jj
+                        if int(KLAS[edge_idx]) == 3:
+                            aqzh0[j] = max(zq - float(ZBC[cell_0idx]), float(HM2)) * float(SIDE[edge_idx])
+                    aqzh1 += aqzh0[j]
+
+                for j in group_rows:
+                    cell_0idx = int(MBZQ[j]) - 1
+                    if cell_0idx < 0 or cell_0idx >= CELL:
+                        continue
+                    base = cell_0idx * NHQ + i
+                    ZW[base] = zq
+                    if aqzh1 != 0.0:
+                        QW[base] = qq * aqzh0[j] / aqzh1
+
     steps_per_day = int(MDT / DT)
 
     return dict(
         CELL=CELL, NOD=NOD, HM1=dtype(HM1), HM2=dtype(HM2),
         DT=dtype(DT), MDT=MDT, NDAYS=NDAYS, JL=dtype(JL),
-        steps_per_day=steps_per_day, NQ=NQ, NZ=NZ,
+        steps_per_day=steps_per_day, NQ=NQ, NZ=NZ, NZQ=NZQ,
+        NHQ=NHQ, NWE=NWE, NDI=NDI,
         H=H, U=U_init.astype(dtype), V=V_init.astype(dtype),
         Z=Z.astype(dtype), W=W,
         ZBC=ZBC, ZB1=ZB1.astype(dtype), AREA=AREA, FNC=FNC.astype(dtype),
@@ -423,6 +548,7 @@ def load_mesh(mesh="default", dtype=np.float32):
         SLCOS=SLCOS.astype(dtype), SLSIN=SLSIN.astype(dtype),
         FLUX0=FLUX0, FLUX1=FLUX1, FLUX2=FLUX2, FLUX3=FLUX3,
         ZT=ZT, DZT=DZT, QT=QT, DQT=DQT, BoundaryFeature=BoundaryFeature,
+        NHQ1=NHQ1, ZW=ZW, QW=QW,
         XP=XP, YP=YP, XIMIN=XIMIN, YIMIN=YIMIN,
         XC=XC, YC=YC, NV=NV,
     )
