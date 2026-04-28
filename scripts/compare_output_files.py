@@ -34,6 +34,12 @@ import sys
 import numpy as np
 
 UNIFIED_DIFF_PREVIEW_LINES = 200
+# difflib.unified_diff is O(n*m) on large files. For the 207K-cell
+# cases the OUTPUT files reach ~80MB / ~3M lines each; running
+# difflib on those takes 15+ minutes per file. The byte-equal flag
+# and per-line counts are still cheap, so above this byte threshold
+# we skip the unified-diff body and emit a placeholder preview.
+UNIFIED_DIFF_MAX_BYTES = 64 * 1024 * 1024
 
 
 # ---------------------------------------------------------------------------
@@ -196,12 +202,21 @@ def text_diff_stats(path_a, path_b, diff_out_path=None):
     n = min(len(la), len(lb))
     diff_lines = sum(1 for i in range(n) if la[i] != lb[i])
     diff_lines += abs(len(la) - len(lb))
-    udiff_iter = difflib.unified_diff(
-        la, lb,
-        fromfile=path_a, tofile=path_b,
-        lineterm="",
-    )
-    udiff_lines = list(udiff_iter)
+    skipped_diff_for_size = max(len(ba), len(bb)) > UNIFIED_DIFF_MAX_BYTES
+    if skipped_diff_for_size:
+        udiff_lines = [
+            f"--- {path_a}",
+            f"+++ {path_b}",
+            f"# unified diff omitted: file > {UNIFIED_DIFF_MAX_BYTES // (1024*1024)}MB"
+            f" (sizes {len(ba)} / {len(bb)} bytes); {diff_lines} differing line positions",
+        ]
+    else:
+        udiff_iter = difflib.unified_diff(
+            la, lb,
+            fromfile=path_a, tofile=path_b,
+            lineterm="",
+        )
+        udiff_lines = list(udiff_iter)
     written_path = None
     if diff_out_path is not None:
         os.makedirs(os.path.dirname(diff_out_path) or ".", exist_ok=True)
