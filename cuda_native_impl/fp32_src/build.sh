@@ -8,14 +8,18 @@ export LD_LIBRARY_PATH=/home/scratch.huanhuanc_gpu/spmd/cuda-toolkit/lib64:$LD_L
 # Detect GPU arch
 ARCH=${1:-sm_80}  # default A100; pass sm_86 for 3060, sm_90 for B200
 
-# --fmad=false disables the worst FMA/non-FMA divergences between
-# Taichi's PTX (which still contracts via LLVM) and nvcc's PTX. We
-# tried adding --ftz=true --prec-div=false to match Taichi's
-# div.approx.ftz.f32 / mul.ftz.f32 / add.ftz.f32 emissions; that
-# improved fp32 step=1 U bit_exact_frac from 0.65 to 0.93 but made
-# the fp32 long-step chaotic divergence ~100x worse (each side
-# walked its own different chaotic trajectory). Reverted to plain
-# --fmad=false.
+# --fmad=false disables FMA contraction in nvcc, eliminating the
+# worst PTX-codegen divergence with Taichi for long-step
+# trajectories. We tested adding --ftz=true --prec-div=false
+# --prec-sqrt=true: that nudges fp32 step=1 U bit_exact_frac
+# from ~0.65 to ~0.93 (still under AC-9's 0.99 threshold for the
+# V field which starts at zero) but makes fp32 long-step chaotic
+# divergence ~100x worse because each side walks its own
+# different trajectory. Long-step alignment is more valuable than
+# the marginal step=1 gain, so we stay with --fmad=false only.
+# Achieving AC-9's 0.99 bit_exact_frac fully would require
+# modifying Taichi's PTX codegen to disable FTZ + LLVM FMA
+# contraction at the kernel level.
 nvcc -O3 -arch=$ARCH -rdc=true --std=c++17 --fmad=false \
     -I"$DIR/hydro-cal-src/include" \
     "$DIR/benchmark.cu" \
