@@ -189,6 +189,35 @@ def dump_native_at_step(case, step, output_dir=None):
     if os.path.exists(dump_file):
         os.remove(dump_file)
 
+    # Pre-flight: native binary's outer day-loop is hard-capped at
+    # NDAYS (TIME.DAT line 2). For inputs above that cap the binary
+    # silently truncates -- the dump captures post-(NDAYS*(MDT/DT-1))
+    # state instead of the requested step, which fooled rounds 3-5
+    # into chasing a phantom "step=35991 first crossing" on F1_6.7K
+    # whose TIME.DAT had NDAYS=10. Refuse to run in that regime.
+    case_data_dir = os.path.join(NATIVE_DIR, data_subdir)
+    try:
+        with open(os.path.join(case_data_dir, "BINFOR", "TIME.DAT")) as f:
+            time_lines = f.read().splitlines()
+        with open(os.path.join(case_data_dir, "BINFOR", "CALTIME.DAT")) as f:
+            cal_lines = f.read().splitlines()
+        mdt = int(time_lines[0].split()[0])
+        ndays = int(time_lines[1].split()[0])
+        dt = float(cal_lines[1].split()[0])
+        steps_per_day = max(int(round(mdt / dt)), 1)
+        max_iters = ndays * (steps_per_day - 1)
+        if step > max_iters:
+            sys.stderr.write(
+                f"  native dump REFUSED for {case} step={step}: NDAYS={ndays} * "
+                f"(steps_per_day-1)={steps_per_day - 1} = max_iters={max_iters}, "
+                f"requested step exceeds the native NDAYS cap. Edit "
+                f"{data_subdir}/BINFOR/TIME.DAT to extend NDAYS or shrink the "
+                f"step list.\n"
+            )
+            return None
+    except (OSError, ValueError, IndexError) as exc:
+        sys.stderr.write(f"  WARN: could not parse TIME.DAT/CALTIME.DAT for {case}: {exc}\n")
+
     cmd = [bin_path, str(step), "1", "--dump", dump_file]
     if output_dir is not None:
         cmd += ["--with-output", "--ntoutput", "1"]
