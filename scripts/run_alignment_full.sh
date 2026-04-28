@@ -22,7 +22,7 @@ if [ -z "$PY" ] || [ ! -x "$PY" ]; then
 fi
 
 STEPS="${STEPS:-1,100,900,7200,36000,72000}"
-CASES="${CASES:-F1_6.7K_fp64 F1_6.7K_fp32 F2_24K_fp64 F2_24K_fp32 F1_207K_fp64 F1_207K_fp32 F2_207K_fp64 F2_207K_fp32}"
+CASES="${CASES:-F1_6.7K_fp64 F2_24K_fp64 F1_207K_fp64 F2_207K_fp64}"
 
 OUT_DIR="results/alignment"
 mkdir -p "$OUT_DIR"
