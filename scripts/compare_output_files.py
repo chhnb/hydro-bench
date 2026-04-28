@@ -34,12 +34,15 @@ import sys
 import numpy as np
 
 UNIFIED_DIFF_PREVIEW_LINES = 200
-# difflib.unified_diff is O(n*m) on large files. For the 207K-cell
-# cases the OUTPUT files reach ~80MB / ~3M lines each; running
-# difflib on those takes 15+ minutes per file. The byte-equal flag
-# and per-line counts are still cheap, so above this byte threshold
-# we skip the unified-diff body and emit a placeholder preview.
-UNIFIED_DIFF_MAX_BYTES = 64 * 1024 * 1024
+# difflib.unified_diff is O(n*m) on large files. Beyond this byte
+# threshold the unified-diff body is skipped; the byte-equal flag
+# and per-line counts are still cheap. Threshold tuned empirically:
+# at 207K cells the H2U2V2.OUT and ZUV.OUT for step >= 36000 reach
+# ~46MB and trigger heavy diffs (Taichi's NaN/Inf divergence makes
+# the line lists wholly different), which difflib chokes on for
+# 30+ minutes. Above 16MB skip the diff body; the comparator's
+# numeric path still extracts H/U/V/Z/W/FI per-frame max diffs.
+UNIFIED_DIFF_MAX_BYTES = 16 * 1024 * 1024
 
 
 # ---------------------------------------------------------------------------
