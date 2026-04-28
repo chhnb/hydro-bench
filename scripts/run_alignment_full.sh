@@ -103,11 +103,28 @@ for r in rows:
     )
 n_pass = sum(1 for r in rows if r["verdict"] == "PASS")
 n_fail = sum(1 for r in rows if r["verdict"] != "PASS")
+expected_count = len(allowed_cases) * len(set("$STEPS".split(",")))
 lines.insert(2, f"**{n_pass} PASS / {n_fail} FAIL of {len(rows)} entries.**")
 lines.insert(3, "")
 with open(os.path.join(out_dir, "SUMMARY.md"), "w") as f:
     f.write("\n".join(lines) + "\n")
 print(f"  {n_pass} PASS / {n_fail} FAIL of {len(rows)} entries")
+# Cardinality assertion: a clean run for the requested matrix must
+# emit exactly len(CASES) * len(STEPS) rows. Anything less means a
+# (case, step) artifact went missing -- exit non-zero so the driver
+# does not silently accept a partial matrix.
+if len(rows) != expected_count:
+    print(f"  ERROR: expected {expected_count} rows for "
+          f"{len(allowed_cases)} cases x {len(set('$STEPS'.split(',')))} steps, "
+          f"found {len(rows)}; matrix is incomplete.")
+    import sys
+    sys.exit(2)
 PY
+
+aggr_status=$?
+if [ $aggr_status -ne 0 ]; then
+    echo "Aggregator reported partial matrix (exit $aggr_status). Returning non-zero."
+    exit $aggr_status
+fi
 
 echo "Done. See $OUT_DIR/SUMMARY.md"

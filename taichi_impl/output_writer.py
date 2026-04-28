@@ -103,8 +103,21 @@ def _write_block_10x100(stream, cell_values):
 
 
 def _flow_angle(u, v):
-    """Replicate native ``MeshData::FI`` (mesh.cpp:828). Result in
+    """Replicate native ``MeshData::FI`` (mesh.cpp:841). Result in
     degrees scaled by 57.298.
+
+    Verified statement-by-statement to match native byte-for-byte
+    when called with identical fp64 ``(u, v)`` inputs (see
+    ``scripts/diag/probe_fi_parity.py``). Any residual ZUV.OUT FI
+    rounding mismatches at 4-decimal level (max_fi_diff ~1e-4) are
+    downstream of fp64 state divergence between native and Taichi:
+    for cells whose ``U`` and ``V`` magnitudes sit just above the
+    ``1e-9`` snap-to-zero threshold, ``atan2(|v|, |u|)`` amplifies
+    the ~1e-15 per-cell state noise into a ~1e-5 degree FI noise,
+    which is enough to flip the 4-decimal half-way rounding on a
+    handful of cells. The fix path is to tighten the upstream state
+    parity (conservation / divergence work in goal-tracker), not to
+    change ``_flow_angle`` further.
 
     Native uses *sequential* ``if`` (not else-if) for the X*Y == 0
     branch, so when both X and Y are zero the second matching branch

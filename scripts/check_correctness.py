@@ -860,7 +860,38 @@ def evaluate_case(case, steps, out_dir):
         native_state = dump_native_at_step(case, step, output_dir=native_out)
         taichi_state = taichi_states.get(step)
         if native_state is None or taichi_state is None:
-            print(f"    SKIP — dump missing")
+            # Per Codex review (round 2): silent-skip lets a partial
+            # matrix masquerade as completed. Emit an explicit FAIL
+            # row and a placeholder JSON so SUMMARY.md surfaces the
+            # missing artifact instead of dropping it.
+            missing = []
+            if native_state is None:
+                missing.append("native")
+            if taichi_state is None:
+                missing.append("taichi")
+            reason = f"dump missing on side(s): {','.join(missing)}"
+            print(f"    -> FAIL: {reason}")
+            placeholder = {
+                "case": case,
+                "step": step,
+                "precision": case_precision(case),
+                "fields": {f: {"max_abs": float("inf"), "all_nonfinite": True}
+                           for f in ("H", "U", "V", "Z", "W", "F0", "F1", "F2", "F3")},
+                "output_files": {},
+                "conservation": {k: {"native": float("nan"), "taichi": float("nan"),
+                                     "abs_diff": float("inf"), "rel_diff": float("inf")}
+                                 for k in ("mass", "momentum_x", "momentum_y",
+                                           "kinetic_energy", "potential_energy",
+                                           "klas10_inflow", "klas1_inflow")},
+                "contributors": {"momentum_x": [], "klas1_inflow": []},
+                "health": {"missing_sides": missing},
+                "verdict": "FAIL",
+                "reason": reason,
+            }
+            os.makedirs(out_dir, exist_ok=True)
+            with open(os.path.join(out_dir, f"{case}_step{step}.json"), "w") as f:
+                json.dump(placeholder, f, indent=2)
+            rows.append(placeholder)
             continue
 
         field_stats = {}
