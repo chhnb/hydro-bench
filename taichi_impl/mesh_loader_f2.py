@@ -266,13 +266,26 @@ def load_mesh(mesh="default", dtype=np.float32):
                 except ValueError:
                     continue
 
-        # Load NZ boundary time series from BOUNDE/NZ/NZxxxx.DAT
+        # Load NZ boundary time series from BOUNDE/NZ/NZxxxx.DAT.
+        # Each file is a (time_in_days, water_level) sequence with the
+        # leading row being the count of data points. Native's
+        # ``BOUNDRYinterp`` linearly interpolates between (time, value)
+        # pairs and HOLDS the last value beyond the file's time range.
+        # The previous Taichi loader treated the file's i-th value as
+        # "water level on day i", which silently zero-fills days beyond
+        # the file's last index when the file's time-stamps actually
+        # span the full simulation window. For NZ0001.DAT the two-point
+        # series ``(t=-1, Z=2925.24)`` and ``(t=60, Z=2925.24)`` is meant
+        # to mean "Z=2925.24 throughout day 0..59", but the old loader
+        # filled only days 0,1 and left day 2..NDAYS-1 = 0. That broke
+        # KLAS=1 boundaries on F2_207K_fp64 starting at step=14399 (the
+        # cell 207225 collapse).
         bounde_dir = os.path.join(data_dir, "BOUNDE", "NZ")
-        nz_data = {}  # group_id -> array of water levels per day
+        nz_data = {}  # group_id -> list of (time_days, water_level)
         for gid in range(1, NZ + 1):
             nz_file = os.path.join(bounde_dir, f"NZ{gid:04d}.DAT")
             if os.path.exists(nz_file):
-                wl = []
+                pairs = []
                 with open(nz_file, 'r', encoding='latin-1') as f:
                     first_line = True
                     for line in f:
@@ -281,27 +294,52 @@ def load_mesh(mesh="default", dtype=np.float32):
                             continue
                         if first_line:
                             first_line = False
-                            # First line may be count; skip if single number
                             parts = s.split()
                             if len(parts) == 1:
+                                # Header is the count of data points.
                                 continue
                         parts = s.split()
                         if len(parts) >= 2:
                             try:
-                                wl.append(float(parts[1]))
+                                pairs.append((float(parts[0]), float(parts[1])))
                             except ValueError:
                                 continue
-                nz_data[gid] = np.array(wl, dtype=np.float32)
+                if pairs:
+                    pairs.sort(key=lambda p: p[0])
+                    nz_data[gid] = pairs
 
-        # Build ZT and DZT arrays [NDAYS * CELL]
+        def _interp_series(pairs, t):
+            """Match native BOUNDRYinterp: linear interp, hold endpoints."""
+            if not pairs:
+                return 0.0
+            if t <= pairs[0][0]:
+                return pairs[0][1]
+            if t >= pairs[-1][0]:
+                return pairs[-1][1]
+            for k in range(len(pairs) - 1):
+                t0, v0 = pairs[k]
+                t1, v1 = pairs[k + 1]
+                if t0 <= t <= t1:
+                    if t1 == t0:
+                        return v0
+                    return v0 + (v1 - v0) * (t - t0) / (t1 - t0)
+            return pairs[-1][1]
+
+        # Build ZT and DZT [NDAYS * CELL] by interpolating each day's
+        # (time-stamp = day index) against the (time, level) pairs.
+        # Native stores BOUNDRYinterp's result in a ``float ZTTEMP``
+        # local before assigning to the fp64 ZT[j][i] (mesh.cpp:405),
+        # which fp32-truncates each value. Mirror that truncation so
+        # Taichi's ZT matches native byte-for-byte.
         for cell_0idx, group_id in MBZ_cells:
             if group_id in nz_data:
-                wl = nz_data[group_id]
-                for day in range(min(NDAYS, len(wl))):
-                    ZT[day * CELL + cell_0idx] = wl[day]
-                    if day < len(wl) - 1 and K0 > 0:
-                        DZT[day * CELL + cell_0idx] = (wl[day + 1] - wl[day]) / K0
-                    # last day: DZT stays 0
+                pairs = nz_data[group_id]
+                for day in range(NDAYS):
+                    z_today = float(np.float32(_interp_series(pairs, float(day))))
+                    ZT[day * CELL + cell_0idx] = z_today
+                    if day < NDAYS - 1 and K0 > 0:
+                        z_tomorrow = float(np.float32(_interp_series(pairs, float(day + 1))))
+                        DZT[day * CELL + cell_0idx] = (z_tomorrow - z_today) / K0
 
     # ---- MBQ.DAT: flow boundary cells (KLAS=10) ----
     lines_mbq = rd("MBQ.DAT")
@@ -324,6 +362,10 @@ def load_mesh(mesh="default", dtype=np.float32):
         group_count_q = {}
         for _, gid in MBQ_cells:
             group_count_q[gid] = group_count_q.get(gid, 0) + 1
+        # Same (time, value) interpretation as NZ above: each NQ file
+        # is a sequence of (time_in_days, discharge) pairs, and native
+        # BOUNDRYinterp linearly interpolates between them, holding
+        # endpoints. Replace the previous "i-th value = day i" reading.
         if os.path.isdir(bounde_nq):
             for fn in os.listdir(bounde_nq):
                 if not (fn.startswith("NQ") and fn.endswith(".DAT")):
@@ -332,7 +374,7 @@ def load_mesh(mesh="default", dtype=np.float32):
                     gid = int(fn[2:6])
                 except ValueError:
                     continue
-                qs = []
+                pairs = []
                 with open(os.path.join(bounde_nq, fn), 'r', encoding='latin-1') as f:
                     first = True
                     for line in f:
@@ -348,21 +390,25 @@ def load_mesh(mesh="default", dtype=np.float32):
                             try:
                                 # Native stores BOUNDRYinterp output in a float
                                 # temporary even when Real is double.
-                                qs.append(float(np.float32(float(parts[1]))))
+                                pairs.append((float(parts[0]),
+                                              float(np.float32(float(parts[1])))))
                             except ValueError:
                                 continue
-                if qs:
-                    nq_data[gid] = qs
+                if pairs:
+                    pairs.sort(key=lambda p: p[0])
+                    nq_data[gid] = pairs
         for cell_0idx, group_id in MBQ_cells:
             if group_id in nq_data:
-                qs = nq_data[group_id]
+                pairs = nq_data[group_id]
                 kl = max(group_count_q.get(group_id, 1), 1)
-                for day in range(min(NDAYS, len(qs))):
-                    q_day = np.float32(np.float32(qs[day]) / np.float32(kl))
-                    QT[day * CELL + cell_0idx] = q_day
-                    if day < len(qs) - 1 and K0 > 0:
-                        q_next = np.float32(np.float32(qs[day + 1]) / np.float32(kl))
-                        DQT[day * CELL + cell_0idx] = (q_next - q_day) / K0
+                for day in range(NDAYS):
+                    q_today = np.float32(
+                        np.float32(_interp_series(pairs, float(day))) / np.float32(kl))
+                    QT[day * CELL + cell_0idx] = q_today
+                    if day < NDAYS - 1 and K0 > 0:
+                        q_tomorrow = np.float32(
+                            np.float32(_interp_series(pairs, float(day + 1))) / np.float32(kl))
+                        DQT[day * CELL + cell_0idx] = (q_tomorrow - q_today) / K0
 
     steps_per_day = int(MDT / DT)
 
