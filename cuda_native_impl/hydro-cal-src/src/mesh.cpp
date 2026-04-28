@@ -621,6 +621,10 @@ void MeshData::outputToFile(int jt, int kt){
 
         Real H20 = cells.H[i];
         if(cells.H[i] <= HM1){ H20 = 0;}
+        // Snap sub-noise-floor magnitudes to positive zero so the
+        // 4-decimal formatter always emits "0.0000" (not "-0.0000")
+        // for cells whose state is at fp arithmetic-noise level.
+        if(fabs(H20) < 1e-9){ H20 = 0;}
 
         H2U2V2_file << std::setw(10) << std::fixed << std::setprecision(4) << H20; // 输出浮点数，总宽度为12，4位小数
     }
@@ -642,6 +646,7 @@ void MeshData::outputToFile(int jt, int kt){
 
         Real U20 = cells.U[i];
         if(cells.H[i] <= HM1){ U20 = 0;}
+        if(fabs(U20) < 1e-9){ U20 = 0;}
 
         H2U2V2_file << std::setw(10) << std::fixed << std::setprecision(4) << U20; // 输出浮点数，总宽度为10，保留2位小数
     }
@@ -663,6 +668,7 @@ void MeshData::outputToFile(int jt, int kt){
 
         Real V20 = cells.V[i];
         if(cells.H[i] <= HM1){ V20 = 0;}
+        if(fabs(V20) < 1e-9){ V20 = 0;}
 
         H2U2V2_file << std::setw(10) << std::fixed << std::setprecision(4) << V20; // 输出浮点数，总宽度为10，保留2位小数
     }
@@ -686,6 +692,7 @@ void MeshData::outputToFile(int jt, int kt){
 
         Real Z20 = cells.Z[i];
         if(cells.H[i] <= HM1){ Z20 = cells.ZBC[i];}
+        if(fabs(Z20) < 1e-9){ Z20 = 0;}
 
         ZUV_file << std::setw(10) << std::fixed << std::setprecision(4) << Z20;
     }
@@ -707,6 +714,7 @@ void MeshData::outputToFile(int jt, int kt){
 
         float W2 = 0;
         if(cells.H[i] > HM1){ W2 = std::sqrt(cells.U[i]*cells.U[i] + cells.V[i]*cells.V[i]);}
+        if(fabs(W2) < 1e-9f){ W2 = 0;}
 
         ZUV_file << std::setw(10) << std::fixed << std::setprecision(4) << W2;
     }
@@ -774,6 +782,7 @@ void MeshData::outputToFile(int jt, int kt){
         }
         Real H20 = cells.H[i];
         if(H20 <= HM1){ H20 = 0;}
+        if(fabs(H20) < 1e-9){ H20 = 0;}
         XY_TEC_file << std::fixed << std::setprecision(4) << H20 << " ";
     }
 
@@ -783,6 +792,7 @@ void MeshData::outputToFile(int jt, int kt){
         }
         Real Z20 = cells.Z[i];
         if(cells.H[i] <= HM1){ Z20 = cells.ZBC[i];}
+        if(fabs(Z20) < 1e-9){ Z20 = 0;}
         XY_TEC_file << std::fixed << std::setprecision(4) << Z20 << " ";
     }
     XY_TEC_file << std::endl;
@@ -793,6 +803,7 @@ void MeshData::outputToFile(int jt, int kt){
         }
         Real U20 = cells.U[i];
         if(cells.H[i] <= HM1){ U20 = 0;}
+        if(fabs(U20) < 1e-9){ U20 = 0;}
         XY_TEC_file << std::fixed << std::setprecision(4) << U20 << " ";
     }
     XY_TEC_file << std::endl;
@@ -803,6 +814,7 @@ void MeshData::outputToFile(int jt, int kt){
         }
         Real V20 = cells.V[i];
         if(cells.H[i] <= HM1){ V20 = 0;}
+        if(fabs(V20) < 1e-9){ V20 = 0;}
         XY_TEC_file << std::fixed << std::setprecision(4) << V20 << " ";
     }
     XY_TEC_file << std::endl;
@@ -813,6 +825,7 @@ void MeshData::outputToFile(int jt, int kt){
         }
         float W2 = 0;
         if(cells.H[i] > HM1){ W2 = std::sqrt(cells.U[i] * cells.U[i] + cells.V[i] * cells.V[i]);}
+        if(fabs(W2) < 1e-9f){ W2 = 0;}
         XY_TEC_file << std::fixed << std::setprecision(4) << W2 << " ";
     }
     XY_TEC_file << std::endl;
@@ -827,6 +840,13 @@ void MeshData::outputToFile(int jt, int kt){
 
 Real MeshData::FI(Real X, Real Y) {
     Real W, FI, MPI = 3.1416;
+
+    // Snap sub-noise-floor inputs to zero so two implementations
+    // that agree at the cell-physics level but disagree on sub-ulp
+    // U/V (e.g. 1e-17 vs -1e-17 from differing PTX rounding) end up
+    // producing the same FI rather than 90/180/270/360 degree flips.
+    if (fabs(X) < 1e-9) X = 0.0;
+    if (fabs(Y) < 1e-9) Y = 0.0;
 
     // Check if X and Y are not both zero
     if (X * Y != 0.0) {

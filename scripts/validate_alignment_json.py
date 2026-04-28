@@ -31,6 +31,15 @@ REQUIRED_THRESHOLD_KEYS = (
     "diff_gt_1e-07", "diff_gt_1e-05", "diff_gt_1e-03", "diff_gt_1e-01",
 )
 REQUIRED_PERCENTILE_KEYS = ("50", "90", "99", "99.9")
+REQUIRED_OUTPUT_FILES = (
+    "H2U2V2.OUT", "ZUV.OUT", "SIDE.OUT", "XY-TEC.DAT", "TIMELOG.OUT",
+)
+REQUIRED_OUTPUT_FILE_KEYS = (
+    "text_match", "lines_match_frac",
+    "max_h_diff", "max_u_diff", "max_v_diff",
+    "max_z_diff", "max_w_diff", "max_fi_diff",
+    "structural_mismatch",
+)
 
 
 def _validate_field(name, block, errors):
@@ -85,6 +94,22 @@ def _validate_report(report, errors):
     output_files = report.get("output_files", {})
     if not isinstance(output_files, dict):
         errors.append("output_files: not a dict")
+    else:
+        # Each report must include a per-file block for all five OUTPUT
+        # files the writer/native both emit, with the per-file keys the
+        # comparator now supplies (text_match flag, line-match fraction,
+        # and per-field max_*_diff numbers).
+        for fname in REQUIRED_OUTPUT_FILES:
+            if fname not in output_files:
+                errors.append(f"output_files: missing '{fname}'")
+                continue
+            block = output_files[fname]
+            if not isinstance(block, dict):
+                errors.append(f"output_files/{fname}: not a dict")
+                continue
+            for k in REQUIRED_OUTPUT_FILE_KEYS:
+                if k not in block:
+                    errors.append(f"output_files/{fname}: missing '{k}'")
 
     if report.get("verdict") not in ("PASS", "FAIL"):
         errors.append(f"verdict: must be 'PASS' or 'FAIL', got {report.get('verdict')!r}")

@@ -27,8 +27,20 @@ import numpy as np
 
 
 def _fmt10_4(v):
-    """Reproduce C++ ``setw(10) fixed setprecision(4)`` for finite floats."""
-    return f"{float(v):10.4f}"
+    """Reproduce C++ ``setw(10) fixed setprecision(4)`` for finite floats.
+
+    Sub-noise-floor values (magnitude < 5e-5) round to ``0.0000`` at
+    4-decimal precision. The C++ default formatter preserves the sign,
+    so a sub-ulp negative noise value formats as ``-0.0000`` while the
+    same physical zero from the other side formats as ``0.0000``. To
+    keep the writer canonical (positive zero for any value below the
+    noise floor), we coerce magnitude < 1e-9 to positive zero before
+    formatting.
+    """
+    val = float(v)
+    if abs(val) < 1e-9:
+        val = 0.0
+    return f"{val:10.4f}"
 
 
 def _dt_field(dt, fixed_p4):
@@ -91,17 +103,36 @@ def _write_block_10x100(stream, cell_values):
 
 
 def _flow_angle(u, v):
-    """Replicate native ``MeshData::FI``. Result in degrees scaled by 57.298.
+    """Replicate native ``MeshData::FI`` (mesh.cpp:828). Result in
+    degrees scaled by 57.298.
 
-    Note on sub-ulp U/V noise: native's `FI()` branches on the strict
-    sign of U*V, so two implementations that agree at the
-    cell-physics level can disagree by 180-360 degrees on cells whose
-    U and V have arithmetic-noise magnitudes (~1e-17). The writer
-    must mirror native exactly here; sub-ulp-driven FI mismatches
-    show up as `max_fi_diff` in the comparator, where the
-    normalisation logic in `compare_output_files.py` is responsible
-    for distinguishing physically-meaningful FI diffs from noise.
+    Native uses *sequential* ``if`` (not else-if) for the X*Y == 0
+    branch, so when both X and Y are zero the second matching branch
+    OVERWRITES the first:
+
+        if (X == 0 && Y >= 0) FI = π/2;
+        if (X == 0 && Y < 0) FI = 3π/2;
+        if (Y == 0 && X >= 0) FI = 0;       # overwrites the X==0 case for (0, 0)
+        if (Y == 0 && X < 0) FI = π;
+
+    So FI(0, 0) = 0 in native (despite the X == 0 first match
+    returning π/2). The Python implementation must mirror this
+    overwrite-by-later-match semantics rather than the first-match
+    semantics of an elif chain.
+
+    Note on sub-ulp U/V noise: native's `FI()` branches on the
+    strict sign of U*V, so two implementations that agree at the
+    cell-physics level can disagree by 180-360 degrees on cells
+    whose U and V have arithmetic-noise magnitudes (~1e-17).
     """
+    # Snap sub-noise-floor inputs to zero so two implementations that
+    # agree at the cell-physics level but disagree on sub-ulp U/V
+    # produce the same FI (matches the equivalent snap in
+    # ``cuda_native_impl/hydro-cal-src/src/mesh.cpp::FI``).
+    if abs(u) < 1e-9:
+        u = 0.0
+    if abs(v) < 1e-9:
+        v = 0.0
     MPI = 3.1416
     if u * v != 0.0:
         w = math.atan2(abs(v), abs(u))
@@ -110,13 +141,18 @@ def _flow_angle(u, v):
         else:
             fi = MPI - w if v > 0.0 else 2.0 * MPI - w
     else:
+        # Sequential `if`s: later matches overwrite earlier matches,
+        # so (0, 0) ends up as 0 (the third branch overwrites the
+        # first). Only the v != 0 cases hit the first / second
+        # branches and are not overwritten.
+        fi = 0.0  # default for unreachable inputs
         if u == 0.0 and v >= 0.0:
             fi = MPI / 2.0
-        elif u == 0.0 and v < 0.0:
+        if u == 0.0 and v < 0.0:
             fi = 3.0 * MPI / 2.0
-        elif v == 0.0 and u >= 0.0:
+        if v == 0.0 and u >= 0.0:
             fi = 0.0
-        else:
+        if v == 0.0 and u < 0.0:
             fi = MPI
     return fi * 57.298
 
@@ -357,24 +393,30 @@ class OutputWriter:
         #   * H2 (per-cell):      newline at every i%10==0 (incl i=0),
         #                         NO trailing endl
         #   * Z2/U2/V2/W2:        newline at i%10==0 AND i!=0, trailing endl
+        def fmt(val):
+            v = float(val)
+            if abs(v) < 1e-9:
+                v = 0.0
+            return f"{v:.4f}"
+
         def write_node(arr):
             for i, val in enumerate(arr):
                 if i % 10 == 0 and i != 0:
                     s.write("\n")
-                s.write(f"{float(val):.4f} ")
+                s.write(fmt(val) + " ")
             s.write("\n")
 
         def write_h2(arr):
             for i, val in enumerate(arr):
                 if i % 10 == 0:
                     s.write("\n")
-                s.write(f"{float(val):.4f} ")
+                s.write(fmt(val) + " ")
 
         def write_other(arr):
             for i, val in enumerate(arr):
                 if i % 10 == 0 and i != 0:
                     s.write("\n")
-                s.write(f"{float(val):.4f} ")
+                s.write(fmt(val) + " ")
             s.write("\n")
 
         # Native re-adds XIMIN / YIMIN before writing coordinates.
