@@ -1,0 +1,32 @@
+.vscode/
+build/
+OUTPUT/
+visual/*.bin
+visual/*.idx
+visual/web/*.log
+visual/*.png
+visual/*.gif
+visual/*.mp4
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Python virtual environments
+venv/
+.venv/
+env/
+ENV/
+*.egg-info/
+dist/
+build/
+
+# ML training data and models
+ml/data/
+ml/models/
+ml/__pycache__/
+ml/*.log
+ml/visualizations/
