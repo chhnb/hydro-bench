@@ -1045,16 +1045,32 @@ def _scan_json_artifacts(out_dir):
     return found
 
 
-def write_summary_md(rows, out_dir):
+def write_summary_md(rows, out_dir, case_scope=None, expected_count=None):
     """Rebuild SUMMARY.md authoritatively from JSON artifacts on disk.
 
     Rows from this invocation overwrite their JSON files first; the
     summary is then assembled by scanning every ``{case}_step{N}.json``
     actually present in ``out_dir``. Stale rows whose JSONs were deleted
     are dropped — the SUMMARY.md is a faithful index of on-disk JSONs.
+
+    Optional safety guards (Codex round-4 review):
+
+    - ``case_scope``: iterable of allowed case names. JSONs whose case
+      is outside this set are excluded from the summary even if present
+      on disk. Mirrors run_alignment_full.sh's CASES filter so manual
+      check_correctness.py runs in dirty out_dirs cannot pollute
+      SUMMARY.md with out-of-scope rows.
+    - ``expected_count``: integer cardinality assertion. When the
+      filtered artifact count != expected_count, write_summary_md
+      raises a SystemExit(2) AFTER writing the (incomplete) summary so
+      the partial state is still observable but the caller's exit
+      status reflects the failure.
     """
     summary_path = os.path.join(out_dir, "SUMMARY.md")
     artifacts = _scan_json_artifacts(out_dir)
+    if case_scope is not None:
+        scope_set = set(case_scope)
+        artifacts = {k: v for k, v in artifacts.items() if k[0] in scope_set}
     # Reports from this invocation are already on disk (written before
     # write_summary_md is called), so artifacts already includes them.
     # The ``rows`` argument is kept for backwards compatibility with
@@ -1092,6 +1108,12 @@ def write_summary_md(rows, out_dir):
     with open(summary_path, "w") as f:
         f.write("\n".join(body) + "\n")
     print(f"\nSummary written to {summary_path} ({len(artifacts)} rows: {n_pass} PASS / {n_fail} FAIL)")
+    if expected_count is not None and len(artifacts) != expected_count:
+        sys.stderr.write(
+            f"  ERROR: SUMMARY.md row count {len(artifacts)} != expected {expected_count}; "
+            f"matrix is incomplete (missing or out-of-scope JSONs).\n"
+        )
+        raise SystemExit(2)
 
 
 # ---------------------------------------------------------------------------
@@ -1112,6 +1134,12 @@ def parse_args(argv):
                    help="Comma-separated step list. Overrides positional argument.")
     p.add_argument("--out-dir", default=RESULTS_DIR,
                    help="Directory for JSON reports + SUMMARY.md")
+    p.add_argument("--scope-cases", default=None,
+                   help="Comma-separated case names. SUMMARY.md is filtered to "
+                        "this scope; out-of-scope JSONs are ignored.")
+    p.add_argument("--expected-count", type=int, default=None,
+                   help="If set, SystemExit(2) when the filtered SUMMARY.md row "
+                        "count does not equal this value (matrix-completeness guard).")
     return p.parse_args(argv)
 
 
@@ -1144,7 +1172,18 @@ def main(argv=None):
     for case in cases:
         rows = evaluate_case(case, steps, args.out_dir)
         all_rows.extend(rows)
-    write_summary_md(all_rows, args.out_dir)
+    scope = (
+        [c.strip() for c in args.scope_cases.split(",") if c.strip()]
+        if args.scope_cases else None
+    )
+    try:
+        write_summary_md(all_rows, args.out_dir,
+                         case_scope=scope, expected_count=args.expected_count)
+    except SystemExit as exc:
+        # write_summary_md raises SystemExit(2) on cardinality mismatch.
+        # Honour that exit code so the caller (driver / CI) sees the
+        # incomplete-matrix signal.
+        return int(exc.code) if exc.code is not None else 2
     failed = [r for r in all_rows if r["verdict"] != "PASS"]
     print(f"\n{len(all_rows) - len(failed)} PASS / {len(failed)} FAIL of {len(all_rows)} entries.")
     return 0 if not failed else 1

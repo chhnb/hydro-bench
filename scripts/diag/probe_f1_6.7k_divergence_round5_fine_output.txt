@@ -1,0 +1,26 @@
+Bisecting F1_6.7K_fp64 divergence starting at step 900 ...
+  step=   900: H max=1.776e-14  argmax_cell=4706  klas=[0, 0, 0, 0]  H_native=+2.857003e+01  H_taichi=+2.857003e+01
+  step=  7200: H max=2.132e-14  argmax_cell=4610  klas=[0, 0, 0, 0]  H_native=+3.513039e+01  H_taichi=+3.513039e+01
+  step= 18000: H max=7.283e-14  argmax_cell=4051  klas=[0, 0, 0, 0]  H_native=+1.575270e+01  H_taichi=+1.575270e+01
+  step= 30000: H max=5.151e-14  argmax_cell=5398  klas=[0, 0, 0, 4]  H_native=+5.694172e+00  H_taichi=+5.694172e+00
+  step= 35500: H max=4.086e-14  argmax_cell=5412  klas=[0, 0, 0, 0]  H_native=+5.584937e+00  H_taichi=+5.584937e+00
+  step= 35550: H max=3.997e-14  argmax_cell=5400  klas=[0, 0, 0, 4]  H_native=+2.804941e+00  H_taichi=+2.804941e+00
+  step= 35600: H max=4.263e-14  argmax_cell=5410  klas=[4, 0, 0, 0]  H_native=+1.278495e+01  H_taichi=+1.278495e+01
+  step= 35650: H max=4.441e-14  argmax_cell=5397  klas=[4, 0, 0, 0]  H_native=+8.204956e+00  H_taichi=+8.204956e+00
+  step= 35700: H max=4.441e-14  argmax_cell=3675  klas=[0, 0, 0, 4]  H_native=+7.174961e+00  H_taichi=+7.174961e+00
+  step= 35750: H max=4.974e-14  argmax_cell=3381  klas=[0, 0, 0, 0]  H_native=+8.152040e+00  H_taichi=+8.152040e+00
+  step= 35800: H max=4.641e-14  argmax_cell=3674  klas=[4, 0, 0, 0]  H_native=+1.764978e+00  H_taichi=+1.764978e+00
+  step= 35850: H max=4.086e-14  argmax_cell=3674  klas=[4, 0, 0, 0]  H_native=+1.764985e+00  H_taichi=+1.764985e+00
+  step= 35900: H max=4.263e-14  argmax_cell=5399  klas=[4, 0, 0, 0]  H_native=+1.108499e+01  H_taichi=+1.108499e+01
+  step= 35950: H max=4.263e-14  argmax_cell=5410  klas=[4, 0, 0, 0]  H_native=+1.278500e+01  H_taichi=+1.278500e+01
+  step= 36000: H max=1.606e-05  argmax_cell=3735  klas=[0, 0, 0, 0]  H_native=+1.957813e+00  H_taichi=+1.957829e+00  *FIRST CROSSING*
+    neighbour_klas=[[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]]
+    U_native=+5.187481e-16  U_taichi=+5.277917e-16
+    V_native=+6.362506e-14  V_taichi=+5.940980e-14
+    Z_native=+1.500578e+02  Z_taichi=+1.500578e+02
+    edge j=0: F0_native=-5.375872e-05 F0_taichi=-5.375872e-05  F1 d=+5.394828e-29
+    edge j=1: F0_native=-5.375872e-05 F0_taichi=-5.375872e-05  F1 d=+9.756838e-28
+    edge j=2: F0_native=-5.375872e-05 F0_taichi=-5.375872e-05  F1 d=+8.978751e-29
+    edge j=3: F0_native=-5.375872e-05 F0_taichi=-5.375872e-05  F1 d=-9.804192e-28
+
+First H.max_abs >= 1e-9 step: 36000.

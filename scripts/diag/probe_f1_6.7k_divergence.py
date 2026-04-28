@@ -39,10 +39,17 @@ sys.path.insert(0, os.path.join(REPO, "scripts"))
 from check_correctness import dump_native_at_step, dump_taichi_multi_step, load_mesh_metadata  # noqa: E402
 
 CASE = "F1_6.7K_fp64"
-# Start in the still-clean window (900) and walk through the
-# transition zone (7200 → 36000). 900 + 1800 + 3600 catches anything
-# that emerges in the first day; 7200..30000 brackets the crossing.
-LADDER = (900, 1800, 3600, 7200, 10000, 14000, 18000, 22000, 26000, 30000, 36000)
+# Round 5 fine-bisect: round-4 + round-5 first pass localized the
+# crossing to (35500, 36000). Within that 500-step window the H state
+# jumps by ~10 orders of magnitude in one shot, so the actual entry
+# is within ~50 steps. Sample at 50-step resolution inside (35500,
+# 36000) to nail the entry step. The earlier 30K..35500 sweep is
+# preserved as the long-baseline view.
+LADDER = (
+    900, 7200, 18000, 30000,
+    35500, 35550, 35600, 35650, 35700, 35750, 35800, 35850, 35900,
+    35950, 36000,
+)
 
 
 def main():
