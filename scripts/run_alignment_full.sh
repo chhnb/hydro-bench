@@ -63,16 +63,24 @@ done
 
 echo
 echo "Aggregating per-(case, step) JSONs into SUMMARY.md ..."
+CASES_LIST="$CASES"
 "$PY" - <<PY
 import glob, json, os
 out_dir = "$OUT_DIR"
+allowed_cases = set("$CASES_LIST".split())
 rows = []
 for path in sorted(glob.glob(os.path.join(out_dir, "*_step*.json"))):
     try:
         with open(path) as f:
-            rows.append(json.load(f))
+            r = json.load(f)
     except Exception:
-        pass
+        continue
+    # Authoritative SUMMARY.md is scoped to the cases that this
+    # invocation was asked to run. Surviving JSONs from out-of-scope
+    # cases (e.g. fp32 leftovers in a fp64-only run) are intentionally
+    # excluded so the report reflects exactly the requested matrix.
+    if r.get("case") in allowed_cases:
+        rows.append(r)
 rows.sort(key=lambda r: (r["case"], r["step"]))
 lines = [
     "# Alignment Validation Summary",
