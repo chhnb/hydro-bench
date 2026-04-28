@@ -636,6 +636,66 @@ def _conservation_diffs(native_metrics, taichi_metrics):
     return out
 
 
+def _top_cell_contributors(native_state, taichi_state, area, klas_edge, side_edge,
+                           top_k=5):
+    """Identify the top-K cells/edges contributing to the dominant
+    conservation rel_diff terms (momentum_x and klas1_inflow).
+
+    For ``momentum_x`` the per-cell contribution is
+    ``H[i] * U[i] * area[i]``; the per-cell delta is the |native-Taichi|
+    of that product. For ``klas1_inflow`` the per-edge contribution is
+    ``F0[e] * side[e]`` masked to KLAS == 1; the per-edge delta is the
+    same |native-Taichi| over those edges only. The returned dict feeds
+    a ``contributors`` block in the JSON report so future rounds can
+    drill into the few cells whose accumulation order or BC handling
+    actually moves the rel_diff above 1e-12.
+    """
+    out = {}
+    nH = native_state["H"].astype(np.float64)
+    nU = native_state["U"].astype(np.float64)
+    tH = taichi_state["H"].astype(np.float64)
+    tU = taichi_state["U"].astype(np.float64)
+    n = min(len(nH), len(area))
+    a = area[:n]
+    momx_native = nH[:n] * nU[:n] * a
+    momx_taichi = tH[:n] * tU[:n] * a
+    momx_delta = np.abs(momx_native - momx_taichi)
+    top = np.argsort(momx_delta)[::-1][:top_k]
+    out["momentum_x"] = [
+        {"idx": int(i),
+         "native_contrib": float(momx_native[i]),
+         "taichi_contrib": float(momx_taichi[i]),
+         "abs_delta": float(momx_delta[i]),
+         "klas": [int(klas_edge[4 * int(i) + j]) for j in range(4)]
+                 if 4 * int(i) + 3 < len(klas_edge) else []}
+        for i in top
+    ]
+
+    nF0 = native_state["F0"].astype(np.float64)
+    tF0 = taichi_state["F0"].astype(np.float64)
+    n_e = min(len(nF0), len(klas_edge), len(side_edge))
+    klas1_mask = klas_edge[:n_e] == 1
+    if klas1_mask.any():
+        klas1_idx = np.flatnonzero(klas1_mask)
+        side1 = side_edge[klas1_idx]
+        nf1 = nF0[klas1_idx] * side1
+        tf1 = tF0[klas1_idx] * side1
+        d1 = np.abs(nf1 - tf1)
+        top1 = np.argsort(d1)[::-1][:top_k]
+        out["klas1_inflow"] = [
+            {"edge_idx": int(klas1_idx[i]),
+             "cell": int(klas1_idx[i]) // 4,
+             "edge_j": int(klas1_idx[i]) % 4,
+             "native_contrib": float(nf1[i]),
+             "taichi_contrib": float(tf1[i]),
+             "abs_delta": float(d1[i])}
+            for i in top1
+        ]
+    else:
+        out["klas1_inflow"] = []
+    return out
+
+
 def _verdict_for(case, step, field_stats, cons_diffs, health):
     """Classify a (case, step) result as PASS / FAIL based on plan thresholds.
 
@@ -816,6 +876,9 @@ def evaluate_case(case, steps, out_dir):
         native_metrics = _conservation_metrics(native_state, area, klas_edge, side_edge)
         taichi_metrics = _conservation_metrics(taichi_state, area, klas_edge, side_edge)
         cons_diffs = _conservation_diffs(native_metrics, taichi_metrics)
+        contributors = _top_cell_contributors(
+            native_state, taichi_state, area, klas_edge, side_edge, top_k=5,
+        )
 
         H_native = native_state["H"]
         H_taichi = taichi_state["H"]
@@ -848,6 +911,7 @@ def evaluate_case(case, steps, out_dir):
             "fields": {k: v for k, v in field_stats.items() if k != "_output"},
             "output_files": output_block,
             "conservation": cons_diffs,
+            "contributors": contributors,
             "health": health,
             "verdict": verdict,
             "reason": reason,
