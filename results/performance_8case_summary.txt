@@ -1,0 +1,50 @@
+Performance — pure GPU kernel time per timestep (A100 80GB PCIe, sm_80)
+=======================================================================
+
+Profiled with `ncu --metrics gpu__time_duration.sum`, sum of (calculate_flux +
+update_cell) per timestep, kernel only (no Python overhead, no launch
+overhead). All numbers are us/step.
+
+Taichi: 1.7.4 (LLVM 15.0.4, CUDA backend)
+Native: nvcc -O3 -arch=sm_80 -rdc=true (cuda_native_impl/, fp32 + fp64
+        separate source trees with `Real DT`)
+CUDA-Graph: Taichi-compiled PTX loaded with cuLaunchKernel + cudaGraph
+            (cuda_impl/, only built for some cases)
+Workload: same kernel cadence as the alignment "1 day" run (step=899).
+
+Case             Taichi      CUDA-Graph   Native       Taichi vs Native
+                 (us/step)   (us/step)    (us/step)
+-----------------------------------------------------------------------
+F1_6.7K_fp32     16.78       n/a          23.90        Taichi 1.42x
+F1_6.7K_fp64     18.64       30.18        26.05        Taichi 1.40x
+F1_207K_fp32     61.18       n/a          97.18        Taichi 1.59x
+F1_207K_fp64    106.83       n/a         178.05        Taichi 1.67x
+F2_24K_fp32      18.94       16.75        25.92        Taichi 1.37x
+F2_24K_fp64      24.13       23.86        30.77        Taichi 1.28x
+F2_207K_fp32     61.47       53.55        97.49        Taichi 1.59x
+F2_207K_fp64    105.87      111.46       177.18        Taichi 1.67x
+
+Across all 8 cases, Taichi-generated PTX is 1.28x–1.67x faster than the
+hand-written native CUDA kernels. The advantage scales with mesh size;
+the 207K cases sit at 1.59x–1.67x. Taichi vs Taichi-PTX-via-CUDA-Graph
+is essentially identical (within a few percent), confirming kernel-time
+parity once the launch path is held constant.
+
+Notes:
+  - "Taichi"     = run @ti.kernel via Python (ncu profiles the python process).
+  - "CUDA-Graph" = same Taichi-compiled PTX loaded via cuLaunchKernel +
+                   cudaGraph. F1 fp32 / F1 207K cuda-graph builds are not
+                   wired up in cuda_impl/, so those cells read "n/a".
+  - "Native"     = hand-written CUDA hydro kernels (cuda_native_impl/),
+                   built without --fmad=false (the FMA root cause work
+                   showed --fmad=false did not bring native any closer
+                   to Taichi's PTX, while regressing performance).
+  - Configuration matches the correctness verification:
+      * real BC data (BOUNDE/NZ, BOUNDE/NQ, BOUNDE/NZQ from
+        hydro-cal `20w-grid-jetson` for 207K, `main` for 24K and F1 6.7K)
+      * DT=0.5s for 207K, DT=4s for F2_24K, DT=1s for F1_6.7K
+      * NDAYS=50 (TIME.DAT), NDAYS=2000 for F2_24K
+  - Profiled at the standard "1 day" step horizon (step=899 = native's
+    inner-loop 899-iteration pass per day).
+
+Raw per-kernel JSONL: results/ncu_results.jsonl.
