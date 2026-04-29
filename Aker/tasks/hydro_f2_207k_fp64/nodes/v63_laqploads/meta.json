@@ -1,0 +1,15 @@
+{
+  "node_id": "v63_laqploads",
+  "parents": [
+    "v42_rowoff"
+  ],
+  "action": "mutate",
+  "direction": "cache LAQP interpolation table values inside the bracket loop",
+  "techniques": [
+    "load_reuse",
+    "register_caching",
+    "boundary_helper_cleanup"
+  ],
+  "rationale": "LAQP reloads the same QW/ZW table entries for the bracket comparison and again for interpolation on KLAS3 boundary sides. Caching A[i], A[i+1], and B[i] in local registers removes redundant table reads while preserving the same interpolation arithmetic.",
+  "attempt_status": "OK"
+}
