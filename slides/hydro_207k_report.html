@@ -83,11 +83,12 @@
 
     h1 {
       margin: 0;
-      font-size: clamp(30px, 3.2vw, 48px);
+      font-size: 42px;
       line-height: 1.05;
       font-weight: 760;
       letter-spacing: 0;
-      max-width: 920px;
+      max-width: none;
+      white-space: nowrap;
     }
 
     .subtitle {
@@ -406,6 +407,89 @@
       line-height: 1.4;
     }
 
+    .flow-grid {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 10px;
+      margin-top: 14px;
+    }
+
+    .flow-step {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      padding: 12px;
+      min-height: 132px;
+      position: relative;
+    }
+
+    .flow-step .numtag {
+      width: 26px;
+      height: 26px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 50%;
+      background: #eef4ff;
+      color: var(--blue);
+      font-size: 13px;
+      font-weight: 790;
+      margin-bottom: 8px;
+    }
+
+    .flow-step .name {
+      color: var(--ink);
+      font-size: 14px;
+      font-weight: 760;
+      line-height: 1.2;
+      margin-bottom: 6px;
+    }
+
+    .flow-step .desc {
+      color: #475467;
+      font-size: 12.5px;
+      line-height: 1.35;
+    }
+
+    .tight-list {
+      font-size: 14.5px;
+      line-height: 1.45;
+    }
+
+    .tight-list li {
+      margin: 6px 0;
+    }
+
+    .mini-metrics {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .mini-metric {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      padding: 12px;
+      min-height: 88px;
+    }
+
+    .mini-metric .label {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      line-height: 1.25;
+    }
+
+    .mini-metric .value {
+      margin-top: 8px;
+      font-size: 22px;
+      font-weight: 790;
+      line-height: 1;
+      font-variant-numeric: tabular-nums;
+    }
+
     .source {
       color: #98a2b3;
       font-size: 12px;
@@ -509,6 +593,11 @@
       .grid-2, .grid-3, .kpi-grid, .timeline {
         grid-template-columns: 1fr;
       }
+      .flow-grid, .mini-metrics { grid-template-columns: 1fr; }
+      h1 {
+        font-size: 34px;
+        white-space: normal;
+      }
       .bar-row { grid-template-columns: 100px 1fr 72px; }
     }
 
@@ -534,7 +623,7 @@
       <header>
         <div>
           <div class="eyebrow">Hydro-Bench · F2 207K fp64</div>
-          <h1>20 万 cell 水动力算例：精度、性能 gap 与自动优化进展</h1>
+          <h1>207K fp64：精度、性能与自动优化</h1>
           <p class="subtitle">对比 Taichi 与 native CUDA，并评估 agent 在 bit-exact 约束下对 CUDA 版本的优化效果。</p>
         </div>
         <div class="page">01 / 05</div>
@@ -600,7 +689,7 @@
       <header>
         <div>
           <div class="eyebrow">Kernel-Only NCU Timing</div>
-          <h1>Taichi 与 native CUDA 的性能差主要在 Flux Kernel</h1>
+          <h1>性能差集中在 Flux Kernel</h1>
           <p class="subtitle">A100 sm_80，F2_207K_fp64，单位为每 timestep 的 GPU kernel time。</p>
         </div>
         <div class="page">02 / 05</div>
@@ -678,7 +767,7 @@
       <header>
         <div>
           <div class="eyebrow">E2E Launch Path Optimization</div>
-          <h1>Taichi Kernel + CUDA Graph：消除 Python/runtime launch overhead</h1>
+          <h1>Taichi + CUDA Graph：E2E Launch 优化</h1>
           <p class="subtitle">这一层优化不改变 kernel 算法，而是把 Taichi step_fn 捕获成 CUDA Graph 后 replay。</p>
         </div>
         <div class="page">03 / 05</div>
@@ -734,7 +823,7 @@
       <header>
         <div>
           <div class="eyebrow">Why Native Flux Is Slower</div>
-          <h1>为什么 Taichi Flux 更快：动态执行路径更轻</h1>
+          <h1>Taichi Flux 更快：动态路径更轻</h1>
           <p class="subtitle">静态 SASS 里 Taichi 并不更短；真正差异来自运行时执行的 FP64 指令、分支谓词和 lane 利用率。</p>
         </div>
         <div class="page">04 / 05</div>
@@ -816,64 +905,86 @@
       <header>
         <div>
           <div class="eyebrow">Agent-Based CUDA Optimization</div>
-          <h1>Agent 自动优化：bit-exact 约束下已有 1.11x 初步提升</h1>
-          <p class="subtitle">搜索空间限制为 native CUDA 的安全局部优化，所有成功节点必须与 frozen native v0 完全一致。</p>
+          <h1>Aker Agent：bit-exact 进化优化</h1>
+          <p class="subtitle">Aker 把 CUDA 优化组织成受约束的 evolutionary loop：生成候选、自动验证、benchmark 排名，再把有效节点写回 leaderboard。</p>
         </div>
         <div class="page">05 / 05</div>
       </header>
 
       <div class="grid-2">
         <div class="panel">
-          <h2>当前 best</h2>
-          <table>
-            <thead>
-              <tr>
-                <th>Version</th>
-                <th class="num">Async</th>
-                <th class="num">CUDA Graph</th>
-                <th class="num">Speedup</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr><td>v0 native CUDA</td><td class="num">161.85 us</td><td class="num">147.11 us</td><td class="num">1.00x</td></tr>
-              <tr><td><strong>v42_rowoff</strong></td><td class="num"><strong>146.23 us</strong></td><td class="num"><strong>131.89 us</strong></td><td class="num"><span class="badge green">1.11x</span></td></tr>
-            </tbody>
-          </table>
-          <div class="timeline">
-            <div class="step-card">
-              <div class="top">Validation</div>
-              <div class="big" style="color:var(--green);">exact</div>
-              <div class="desc">H/U/V/Z/W/F0-F3 全字段 max_abs=0</div>
+          <h2>进化迭代机制</h2>
+          <div class="flow-grid">
+            <div class="flow-step">
+              <div class="numtag">1</div>
+              <div class="name">Spec 锁定</div>
+              <div class="desc">固定 case、父节点、可改文件、性能指标和 exact correctness gate。</div>
             </div>
-            <div class="step-card">
-              <div class="top">Steps</div>
-              <div class="big" style="color:var(--blue);">7199</div>
-              <div class="desc">包含长步数 checkpoint</div>
+            <div class="flow-step">
+              <div class="numtag">2</div>
+              <div class="name">Agent 变异</div>
+              <div class="desc">读取 leaderboard、guidance、SASS/NCU 证据，在新 node 写入 kernel.cu。</div>
             </div>
-            <div class="step-card">
-              <div class="top">Best action</div>
-              <div class="big" style="color:var(--teal);">rowoff</div>
-              <div class="desc">缓存 KLAS3 boundary table row offset</div>
+            <div class="flow-step">
+              <div class="numtag">3</div>
+              <div class="name">Reviewer 筛选</div>
+              <div class="desc">阻止越界改动、缺失节点、明显改变语义或无法解释的风险 patch。</div>
             </div>
-            <div class="step-card">
-              <div class="top">Residual</div>
-              <div class="big" style="color:var(--amber);">flux</div>
-              <div class="desc">主要 gap 仍在 CalculateFluxKernel</div>
+            <div class="flow-step">
+              <div class="numtag">4</div>
+              <div class="name">自动评测</div>
+              <div class="desc">编译、跑 1/10/100/899/7199 步，对 H/U/V/Z/W/F0-F3 exact diff。</div>
             </div>
+            <div class="flow-step">
+              <div class="numtag">5</div>
+              <div class="name">排序继承</div>
+              <div class="desc">通过者 benchmark，写 leaderboard；下一轮从 best 和成功分支继续变异。</div>
+            </div>
+          </div>
+          <div class="callout blue" style="margin-top:16px;">
+            这不是单次代码生成，而是 generate → review → build → validate → benchmark → rank 的闭环搜索；并行 slots 只是同时探索多个候选节点。
           </div>
         </div>
 
         <div>
-          <div class="quote">
-            当前 agent 已经能自动找到安全的 CUDA micro-optimization；但它还没有改变 flux kernel 的整体代码形态。
+          <div class="panel">
+            <h2>当前产出</h2>
+            <table>
+              <thead>
+                <tr>
+                  <th>Version</th>
+                  <th class="num">Async</th>
+                  <th class="num">Graph</th>
+                  <th class="num">Speedup</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><td>v0 native</td><td class="num">161.85 us</td><td class="num">147.11 us</td><td class="num">1.00x</td></tr>
+                <tr><td><strong>v42_rowoff</strong></td><td class="num"><strong>146.23 us</strong></td><td class="num"><strong>131.89 us</strong></td><td class="num"><span class="badge green">1.11x</span></td></tr>
+              </tbody>
+            </table>
+            <div class="mini-metrics">
+              <div class="mini-metric">
+                <div class="label">Correctness</div>
+                <div class="value" style="color:var(--green);">exact</div>
+              </div>
+              <div class="mini-metric">
+                <div class="label">Best action</div>
+                <div class="value" style="color:var(--teal);">rowoff</div>
+              </div>
+              <div class="mini-metric">
+                <div class="label">Residual gap</div>
+                <div class="value" style="color:var(--amber);">flux</div>
+              </div>
+            </div>
           </div>
-          <div class="panel flat" style="margin-top:18px;">
-            <h2>下一步</h2>
-            <ul>
-              <li>继续保持 exact-preserving track，用于可交付优化。</li>
-              <li>另开 experimental track，允许更大范围的 flux rewrite。</li>
-              <li>如果改变浮点运算顺序，需要定义 relaxed numerical validation，而不能混入 exact leaderboard。</li>
-              <li>重点目标：减少 branch/predicate waste、数组 scratch、重复 helper 计算。</li>
+          <div class="panel flat" style="margin-top:14px;">
+            <h2>技术边界</h2>
+            <ul class="tight-list">
+              <li>Exact track 只接受不改变 native v0 数值轨迹的局部 CUDA 优化。</li>
+              <li>失败节点包括 compile fail、accuracy diff、reviewer 拒绝或 agent 没产出 node。</li>
+              <li>更大范围 Flux rewrite 要单独开 experimental track，并定义 relaxed validation。</li>
+              <li>下一步让 agent 基于 NCU dynamic metrics 定向减少 FP64、branch 和 predicate work。</li>
             </ul>
           </div>
         </div>
