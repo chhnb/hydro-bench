@@ -1,0 +1,15 @@
+{
+  "node_id": "v30_trig_arg",
+  "parents": [
+    "v18_hb1_sqrt"
+  ],
+  "action": "mutate",
+  "direction": "pass cached CalculateFlux side-normal trig values into boundary helpers",
+  "techniques": [
+    "load_reuse",
+    "register_caching",
+    "helper_argument_reuse"
+  ],
+  "rationale": "CalculateFluxKernel already loads sides.COSF[idx] and sides.SINF[idx] into COSJ and SINJ before boundary dispatch, but the KLAS 3 and KLAS 6 boundary helpers reload the same immutable side-normal values. Passing the cached values through BOUNDA removes redundant global reads on those boundary paths without changing arithmetic expression order.",
+  "attempt_status": "OK"
+}
