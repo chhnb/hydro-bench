@@ -1,0 +1,15 @@
+{
+  "node_id": "v26_klas6_geom",
+  "parents": [
+    "v18_hb1_sqrt"
+  ],
+  "action": "mutate",
+  "direction": "pass cached side geometry into KLAS6 boundary helper",
+  "techniques": [
+    "load_reuse",
+    "helper_argument_reuse",
+    "register_caching"
+  ],
+  "rationale": "CalculateFluxKernel already loads sides.COSF[idx] and sides.SINF[idx] into local registers for each side, but the KLAS6 boundary helper reloads the same geometry values when projecting neighbor velocity. Passing the cached values through BOUNDA removes redundant global geometry reads on KLAS6 boundary sides while preserving the same projection expressions and operand order.",
+  "attempt_status": "OK"
+}
