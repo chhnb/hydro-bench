@@ -1,0 +1,15 @@
+{
+  "node_id": "v96_k1f0",
+  "parents": [
+    "v75_k1args"
+  ],
+  "action": "mutate",
+  "direction": "reuse freshly computed KLAS1 FLR0 locally on the KLAS1-index parent",
+  "techniques": [
+    "store_forwarding_avoidance",
+    "register_caching",
+    "boundary_helper_cleanup"
+  ],
+  "rationale": "CalculateKlas1 stores FLR(0) as HB1 * URB and immediately reads the same macro-backed sides.FLUX0[idx] value to form FLR(1). Keeping the freshly computed flux0 in a local register removes that read-back while preserving the same multiplication operands and order.",
+  "attempt_status": "OK"
+}
