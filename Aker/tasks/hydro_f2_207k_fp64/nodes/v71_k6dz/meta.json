@@ -1,0 +1,15 @@
+{
+  "node_id": "v71_k6dz",
+  "parents": [
+    "v42_rowoff"
+  ],
+  "action": "mutate",
+  "direction": "cache signed depth delta in KLAS6 fully-wet branch",
+  "techniques": [
+    "scalar_cse",
+    "register_caching",
+    "boundary_helper_cleanup"
+  ],
+  "rationale": "CalculataKlas6 recomputes Z_pre - ZC in the fully-wet weir branch for fabs, copysign, and downstream flux products. Caching that signed depth delta once removes duplicate subtractions while preserving the same sign argument and multiplication order.",
+  "attempt_status": "OK"
+}
