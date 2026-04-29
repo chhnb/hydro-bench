@@ -1,0 +1,15 @@
+{
+  "node_id": "v41_tsidx",
+  "parents": [
+    "v27_ratio_reg"
+  ],
+  "action": "mutate",
+  "direction": "cache boundary time-series index in KLAS1 and KLAS10",
+  "techniques": [
+    "integer_cse",
+    "index_reuse",
+    "boundary_helper_cleanup"
+  ],
+  "rationale": "CalculateKlas1 and CalculateKlas10 each compute jt * mesh.CELL + pos twice to read paired boundary time-series arrays. Caching that integer index in a local variable removes redundant index arithmetic without changing any floating-point expression or memory address.",
+  "attempt_status": "OK"
+}
