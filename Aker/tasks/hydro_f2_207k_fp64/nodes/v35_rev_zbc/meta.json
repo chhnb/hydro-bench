@@ -1,0 +1,15 @@
+{
+  "node_id": "v35_rev_zbc",
+  "parents": [
+    "v27_ratio_reg"
+  ],
+  "action": "mutate",
+  "direction": "cache current-cell bed elevation in the reverse internal-edge path",
+  "techniques": [
+    "load_reuse",
+    "register_caching",
+    "internal_edge_flux"
+  ],
+  "rationale": "The reverse internal-edge branch in CalculateFluxKernel reads cells.ZBC[pos] to form ZC1, then reloads the same current-cell bed elevation after OSHER for the ZA comparison and HC3 subtraction. Caching that value in a local register removes redundant global reads on reverse internal sides while preserving the same comparisons and flux expressions.",
+  "attempt_status": "OK"
+}
