@@ -1,0 +1,15 @@
+{
+  "node_id": "v44_osher_qreg",
+  "parents": [
+    "v27_ratio_reg"
+  ],
+  "action": "mutate",
+  "direction": "cache OSHER normal-state scalars for K1 classification",
+  "techniques": [
+    "load_reuse",
+    "register_caching",
+    "osher_classification"
+  ],
+  "rationale": "OSHER reads QR[1] once to form FIR and then repeatedly reads QL[1] and QR[1] while classifying K1. Keeping QR[1] and QL[1] in local registers removes repeated local array loads on internal-edge OSHER calls without changing the comparison operands or flux arithmetic.",
+  "attempt_status": "OK"
+}
