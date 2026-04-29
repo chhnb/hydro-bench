@@ -1,0 +1,15 @@
+{
+  "node_id": "v37_zbc_reg",
+  "parents": [
+    "v27_ratio_reg"
+  ],
+  "action": "mutate",
+  "direction": "cache owner-cell ZBC value across CalculateFlux nonboundary branches",
+  "techniques": [
+    "load_reuse",
+    "register_caching",
+    "branch_local_cache"
+  ],
+  "rationale": "After the special-boundary, dry, and ZI<=BC exits, CalculateFluxKernel repeatedly reloads cells.ZBC[pos] while evaluating the remaining nonboundary flux branches and internal-edge reconstruction. Loading that owner-cell bed value once into ZBCP removes redundant global reads on those paths while preserving the same branch order and flux arithmetic operands.",
+  "attempt_status": "OK"
+}
