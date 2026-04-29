@@ -1,0 +1,15 @@
+{
+  "node_id": "v89_k1habs",
+  "parents": [
+    "v75_k1args"
+  ],
+  "action": "mutate",
+  "direction": "cache H1 times absolute owner normal velocity on the KLAS1-index parent",
+  "techniques": [
+    "scalar_cse",
+    "fp64_arithmetic_reduction",
+    "calculate_flux_cleanup"
+  ],
+  "rationale": "In the ZC <= cells.ZBC[pos] CalculateFluxKernel branch, v75_k1args forms H1 * fabs(QL[1]) twice as the left-associated prefix for FLUX1 and FLUX2. Caching that exact prefix removes one fabs and one FP64 multiply on this branch while preserving the multiplication order for both stored flux expressions.",
+  "attempt_status": "OK"
+}
