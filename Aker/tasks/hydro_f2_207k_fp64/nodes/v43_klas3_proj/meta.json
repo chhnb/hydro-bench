@@ -1,0 +1,15 @@
+{
+  "node_id": "v43_klas3_proj",
+  "parents": [
+    "v27_ratio_reg"
+  ],
+  "action": "mutate",
+  "direction": "reuse cached QL normal velocity in KLAS3 boundary inflow calculation",
+  "techniques": [
+    "projection_reuse",
+    "register_caching",
+    "boundary_helper"
+  ],
+  "rationale": "CalculateFluxKernel already computes QL[1] as the owner-cell normal velocity before boundary dispatch, but CalculateKlas3 recomputes the same projection to form QZH3. Reusing QL[1] removes redundant geometry loads and multiply-add work on KLAS3 boundary sides while preserving branch order and flux arithmetic.",
+  "attempt_status": "OK"
+}
