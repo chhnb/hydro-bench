@@ -118,12 +118,16 @@ def _cmd_new(args: argparse.Namespace) -> int:
 
 
 def _count_prior_rounds(task_dir: Path) -> int:
-    """Count the number of close events in `_reservations.jsonl` — i.e.,
-    rounds attempted across all prior `aker run` invocations on this task."""
+    """Count unique closed reservations in `_reservations.jsonl`.
+
+    Older runs may have duplicate close events for the same reservation
+    after manual recovery races; those should still count as one round.
+    """
     rfile = task_dir / "_reservations.jsonl"
     if not rfile.is_file():
         return 0
-    n = 0
+    closed_ids: set[str] = set()
+    anonymous_closes = 0
     for line in rfile.read_text().splitlines():
         line = line.strip()
         if not line:
@@ -133,8 +137,12 @@ def _count_prior_rounds(task_dir: Path) -> int:
         except json.JSONDecodeError:
             continue
         if evt.get("event") == "close":
-            n += 1
-    return n
+            rid = evt.get("reservation_id")
+            if rid:
+                closed_ids.add(str(rid))
+            else:
+                anonymous_closes += 1
+    return len(closed_ids) + anonymous_closes
 
 
 def _read_v0_and_best(task_dir: Path) -> tuple[float | None, float | None]:

@@ -211,8 +211,11 @@ def close_reservation(
     status: str,
     reason: str | None = None,
 ) -> None:
-    """Append a close event. Idempotent at the file-format level:
-    appending twice is harmless (reconstruct keeps the last)."""
+    """Append a close event if the reservation is still open.
+
+    Idempotent: a duplicate close for the same reservation is ignored, so
+    lifecycle counters and progress bars do not double-count one round.
+    """
     task_dir = Path(task_dir).resolve()
     event: dict = {
         "event": "close",
@@ -223,6 +226,9 @@ def close_reservation(
     if reason:
         event["reason"] = reason
     with reservations_lock(task_dir):
+        rec = reconstruct(read_events(task_dir)).get(reservation_id)
+        if rec is not None and not rec.is_open:
+            return
         _append_event(task_dir, event)
 
 

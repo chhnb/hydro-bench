@@ -74,6 +74,22 @@ def test_allocation_monotonic() -> None:
         print("[alloc] OK monotonic + no reuse")
 
 
+def test_close_reservation_is_idempotent() -> None:
+    with tempfile.TemporaryDirectory() as td_str:
+        td = Path(td_str)
+        _make_task(td)
+        r = res.open_reservation(td, slot_id="s0")
+        res.close_reservation(td, r.reservation_id, status=res.CLOSE_COMMITTED)
+        res.close_reservation(td, r.reservation_id, status=res.CLOSE_CRASHED, reason="late")
+        events = [
+            e for e in res.read_events(td)
+            if e.get("event") == "close" and e.get("reservation_id") == r.reservation_id
+        ]
+        assert len(events) == 1, events
+        assert events[0]["status"] == res.CLOSE_COMMITTED
+        print("[close] OK duplicate close ignored")
+
+
 def test_committed_on_disk_respected() -> None:
     # Fresh task dir with pre-existing committed nodes but empty jsonl.
     # N allocation should jump past the highest on-disk N.
@@ -272,6 +288,7 @@ def test_committed_dir_hides_from_inflight() -> None:
 
 def main() -> int:
     test_allocation_monotonic()
+    test_close_reservation_is_idempotent()
     test_committed_on_disk_respected()
     test_concurrent_allocation()
     test_sweep_stale()
