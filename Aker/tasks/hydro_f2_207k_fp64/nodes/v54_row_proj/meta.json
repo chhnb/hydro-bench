@@ -1,0 +1,15 @@
+{
+  "node_id": "v54_row_proj",
+  "parents": [
+    "v42_rowoff"
+  ],
+  "action": "mutate",
+  "direction": "reuse cached QL normal velocity on the row-offset branch",
+  "techniques": [
+    "projection_reuse",
+    "register_caching",
+    "boundary_helper"
+  ],
+  "rationale": "v42_rowoff still reloads KLAS3 side-normal geometry and recomputes U_pre * COSF + V_pre * SINF to form QZH3, even though CalculateFluxKernel already computed the same owner normal velocity in QL[1] before boundary dispatch. Reusing QL[1] removes redundant geometry loads and multiply-add work while preserving the side-length multiply and existing row-offset reuse.",
+  "attempt_status": "OK"
+}
