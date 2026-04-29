@@ -1,0 +1,922 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hydro 207K 优化汇报</title>
+  <style>
+    :root {
+      --ink: #172033;
+      --muted: #667085;
+      --line: #d9dee8;
+      --soft: #f6f8fb;
+      --blue: #2563eb;
+      --teal: #0f9f8f;
+      --green: #18a058;
+      --amber: #d97706;
+      --red: #dc2626;
+      --violet: #7c3aed;
+      --shadow: 0 18px 45px rgba(30, 41, 59, 0.10);
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      min-height: 100%;
+      background: #ffffff;
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+        "Segoe UI", "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+      letter-spacing: 0;
+    }
+
+    body {
+      overflow: hidden;
+    }
+
+    .deck {
+      width: 100vw;
+      height: 100vh;
+      position: relative;
+      background:
+        linear-gradient(90deg, rgba(217, 222, 232, 0.55) 1px, transparent 1px),
+        linear-gradient(180deg, rgba(217, 222, 232, 0.40) 1px, transparent 1px);
+      background-size: 42px 42px;
+    }
+
+    .slide {
+      position: absolute;
+      inset: 0;
+      padding: 42px 58px 42px;
+      opacity: 0;
+      transform: translateX(24px);
+      pointer-events: none;
+      transition: opacity 220ms ease, transform 220ms ease;
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      gap: 22px;
+      background: rgba(255, 255, 255, 0.92);
+    }
+
+    .slide.active {
+      opacity: 1;
+      transform: translateX(0);
+      pointer-events: auto;
+    }
+
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 24px;
+    }
+
+    .eyebrow {
+      color: var(--teal);
+      font-size: 13px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 9px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(30px, 3.2vw, 48px);
+      line-height: 1.05;
+      font-weight: 760;
+      letter-spacing: 0;
+      max-width: 920px;
+    }
+
+    .subtitle {
+      margin-top: 12px;
+      color: var(--muted);
+      font-size: 17px;
+      line-height: 1.45;
+      max-width: 900px;
+    }
+
+    .page {
+      color: #98a2b3;
+      font-size: 14px;
+      font-weight: 650;
+      white-space: nowrap;
+      padding-top: 6px;
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1.05fr 0.95fr;
+      gap: 26px;
+      min-height: 0;
+    }
+
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 18px;
+      align-items: stretch;
+    }
+
+    .panel {
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      padding: 20px 22px;
+      min-width: 0;
+    }
+
+    .panel.flat {
+      box-shadow: none;
+      background: var(--soft);
+    }
+
+    .panel h2 {
+      margin: 0 0 14px;
+      font-size: 18px;
+      line-height: 1.25;
+    }
+
+    .metric-row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 16px;
+      align-items: end;
+      padding: 12px 0;
+      border-bottom: 1px solid #edf0f5;
+    }
+
+    .metric-row:last-child { border-bottom: 0; }
+
+    .metric-label {
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1.35;
+    }
+
+    .metric-value {
+      font-size: 25px;
+      line-height: 1;
+      font-weight: 770;
+      text-align: right;
+    }
+
+    .metric-value.blue { color: var(--blue); }
+    .metric-value.teal { color: var(--teal); }
+    .metric-value.green { color: var(--green); }
+    .metric-value.amber { color: var(--amber); }
+    .metric-value.red { color: var(--red); }
+    .metric-value.violet { color: var(--violet); }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13.5px;
+      line-height: 1.25;
+    }
+
+    table.compact {
+      font-size: 12.8px;
+      line-height: 1.22;
+    }
+
+    table.compact th,
+    table.compact td {
+      padding: 8px 7px;
+    }
+
+    th {
+      text-align: left;
+      color: #475467;
+      font-weight: 720;
+      border-bottom: 1px solid var(--line);
+      padding: 10px 8px;
+      background: #fafbfc;
+    }
+
+    td {
+      border-bottom: 1px solid #edf0f5;
+      padding: 10px 8px;
+      vertical-align: middle;
+    }
+
+    tr:last-child td { border-bottom: 0; }
+
+    .num {
+      font-variant-numeric: tabular-nums;
+      font-feature-settings: "tnum";
+      text-align: right;
+      white-space: nowrap;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      padding: 3px 8px;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 750;
+      white-space: nowrap;
+    }
+
+    .badge.green { background: #eaf8f0; color: #087443; }
+    .badge.amber { background: #fff5df; color: #a15c07; }
+    .badge.blue { background: #eef4ff; color: #1d4ed8; }
+    .badge.red { background: #fef2f2; color: #b91c1c; }
+
+    .bar-chart {
+      display: grid;
+      gap: 18px;
+      padding-top: 4px;
+    }
+
+    .bar-row {
+      display: grid;
+      grid-template-columns: 138px 1fr 84px;
+      gap: 14px;
+      align-items: center;
+    }
+
+    .bar-label {
+      color: #344054;
+      font-size: 14px;
+      font-weight: 680;
+    }
+
+    .track {
+      height: 18px;
+      border-radius: 8px;
+      background: #edf1f7;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .bar {
+      height: 100%;
+      border-radius: 8px;
+      width: var(--w);
+      background: var(--c);
+    }
+
+    .bar-value {
+      color: var(--ink);
+      font-size: 14px;
+      font-weight: 760;
+      font-variant-numeric: tabular-nums;
+      text-align: right;
+    }
+
+    .split-bars {
+      display: grid;
+      gap: 14px;
+    }
+
+    .stack {
+      height: 32px;
+      border-radius: 8px;
+      background: #eef1f6;
+      overflow: hidden;
+      display: flex;
+      border: 1px solid #e4e8ef;
+    }
+
+    .seg {
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      font-size: 12px;
+      font-weight: 760;
+      font-variant-numeric: tabular-nums;
+      min-width: 36px;
+      width: var(--w);
+      background: var(--c);
+    }
+
+    .stack-label {
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      color: var(--muted);
+      font-size: 13px;
+      margin-bottom: 7px;
+    }
+
+    .callout {
+      border-left: 5px solid var(--teal);
+      background: #f0fbf9;
+      padding: 14px 16px;
+      border-radius: 8px;
+      color: #17443d;
+      font-size: 16px;
+      line-height: 1.48;
+      font-weight: 620;
+    }
+
+    .callout.amber {
+      border-left-color: var(--amber);
+      background: #fff7e8;
+      color: #57370b;
+    }
+
+    .callout.blue {
+      border-left-color: var(--blue);
+      background: #eff6ff;
+      color: #1d3b72;
+    }
+
+    ul {
+      margin: 0;
+      padding-left: 20px;
+      color: #344054;
+      line-height: 1.55;
+      font-size: 15.5px;
+    }
+
+    li { margin: 8px 0; }
+
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 14px;
+    }
+
+    .kpi {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      padding: 16px;
+      min-height: 112px;
+    }
+
+    .kpi .label {
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 680;
+      min-height: 36px;
+      line-height: 1.35;
+    }
+
+    .kpi .value {
+      margin-top: 10px;
+      font-size: 28px;
+      font-weight: 790;
+      line-height: 1;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .timeline {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 14px;
+      margin-top: 18px;
+    }
+
+    .step-card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 16px;
+      background: #fff;
+      min-height: 138px;
+    }
+
+    .step-card .top {
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 720;
+      margin-bottom: 10px;
+    }
+
+    .step-card .big {
+      font-size: 25px;
+      font-weight: 790;
+      line-height: 1.1;
+      margin-bottom: 8px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .step-card .desc {
+      color: #475467;
+      font-size: 13.5px;
+      line-height: 1.4;
+    }
+
+    .source {
+      color: #98a2b3;
+      font-size: 12px;
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      align-items: center;
+      border-top: 1px solid #edf0f5;
+      padding-top: 12px;
+    }
+
+    .nav {
+      position: fixed;
+      z-index: 20;
+      right: 28px;
+      bottom: 24px;
+      display: flex;
+      gap: 9px;
+      align-items: center;
+    }
+
+    .nav button {
+      width: 38px;
+      height: 38px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--ink);
+      box-shadow: 0 8px 22px rgba(30, 41, 59, 0.12);
+      cursor: pointer;
+      font-size: 20px;
+      line-height: 1;
+    }
+
+    .dots {
+      display: flex;
+      gap: 7px;
+      padding: 0 7px;
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #cbd5e1;
+    }
+
+    .dot.active { background: var(--teal); }
+
+    .legend {
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+      color: var(--muted);
+      font-size: 13px;
+      margin-top: 12px;
+    }
+
+    .legend span::before {
+      content: "";
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      border-radius: 3px;
+      margin-right: 6px;
+      background: var(--c);
+    }
+
+    .quote {
+      font-size: 21px;
+      line-height: 1.48;
+      font-weight: 700;
+      color: #1f2937;
+      padding: 20px;
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+    }
+
+    .mini-note {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.5;
+      margin-top: 10px;
+    }
+
+    @media (max-width: 980px) {
+      body { overflow: auto; }
+      .deck { height: auto; min-height: 100vh; }
+      .slide {
+        position: relative;
+        min-height: 100vh;
+        opacity: 1;
+        transform: none;
+        pointer-events: auto;
+        display: grid;
+        padding: 30px 22px;
+      }
+      .slide:not(.active) { display: none; }
+      .grid-2, .grid-3, .kpi-grid, .timeline {
+        grid-template-columns: 1fr;
+      }
+      .bar-row { grid-template-columns: 100px 1fr 72px; }
+    }
+
+    @media print {
+      body { overflow: visible; background: #fff; }
+      .deck { height: auto; background: #fff; }
+      .slide {
+        position: relative;
+        opacity: 1 !important;
+        transform: none !important;
+        pointer-events: auto;
+        page-break-after: always;
+        width: 100vw;
+        height: 100vh;
+      }
+      .nav { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <main class="deck">
+    <section class="slide active">
+      <header>
+        <div>
+          <div class="eyebrow">Hydro-Bench · F2 207K fp64</div>
+          <h1>20 万 cell 水动力算例：精度、性能 gap 与自动优化进展</h1>
+          <p class="subtitle">对比 Taichi 与 native CUDA，并评估 agent 在 bit-exact 约束下对 CUDA 版本的优化效果。</p>
+        </div>
+        <div class="page">01 / 05</div>
+      </header>
+
+      <div class="grid-2">
+        <div class="panel">
+          <h2>精度对比：Taichi vs native CUDA</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>Step</th>
+                <th class="num">H max</th>
+                <th class="num">U max</th>
+                <th class="num">V max</th>
+                <th class="num">Max state</th>
+                <th class="num">Max flux</th>
+                <th class="num">Mass rel</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td>1</td><td class="num">0</td><td class="num">1.07e-15</td><td class="num">9.07e-16</td><td class="num">1.09e-15</td><td class="num">9.09e-13</td><td class="num">0</td></tr>
+              <tr><td>100</td><td class="num">3.75e-13</td><td class="num">5.52e-13</td><td class="num">5.93e-13</td><td class="num">5.93e-13</td><td class="num">1.21e-10</td><td class="num">0</td></tr>
+              <tr><td>899</td><td class="num">3.37e-13</td><td class="num">2.55e-12</td><td class="num">2.23e-12</td><td class="num">2.55e-12</td><td class="num">1.26e-10</td><td class="num">0</td></tr>
+              <tr><td>7199</td><td class="num">2.40e-2</td><td class="num">3.93e-1</td><td class="num">3.17e-1</td><td class="num">5.05e-1</td><td class="num">1.20e1</td><td class="num">3.40e-8</td></tr>
+              <tr><td>72000</td><td class="num">1.15e-1</td><td class="num">2.34e0</td><td class="num">4.94e0</td><td class="num">5.15e0</td><td class="num">5.19e1</td><td class="num">6.36e-7</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div>
+          <div class="kpi-grid" style="grid-template-columns: repeat(2, 1fr);">
+            <div class="kpi">
+              <div class="label">Cells</div>
+              <div class="value" style="color: var(--blue);">207,234</div>
+            </div>
+            <div class="kpi">
+              <div class="label">Edges</div>
+              <div class="value" style="color: var(--teal);">828,936</div>
+            </div>
+            <div class="kpi">
+              <div class="label">短步长 state max</div>
+              <div class="value" style="color: var(--green);">2.55e-12</div>
+            </div>
+            <div class="kpi">
+              <div class="label">7199 步 H p99</div>
+              <div class="value" style="color: var(--amber);">2.97e-9</div>
+            </div>
+          </div>
+          <div class="callout" style="margin-top:18px;">
+            短 horizon 到 899 步基本是 fp64 roundoff 级别；长 horizon 的 pointwise max 会放大，但全局质量守恒相对误差仍在 1e-8 到 1e-6 量级。
+          </div>
+        </div>
+      </div>
+
+      <footer class="source">
+        <span>数据源：results/alignment_runs/phase_c</span>
+        <span>字段：H, U, V, Z, W, F0-F3</span>
+      </footer>
+    </section>
+
+    <section class="slide">
+      <header>
+        <div>
+          <div class="eyebrow">Kernel-Only NCU Timing</div>
+          <h1>Taichi 与 native CUDA 的性能差主要在 Flux Kernel</h1>
+          <p class="subtitle">A100 sm_80，F2_207K_fp64，单位为每 timestep 的 GPU kernel time。</p>
+        </div>
+        <div class="page">02 / 05</div>
+      </header>
+
+      <div class="grid-2">
+        <div class="panel">
+          <h2>Kernel 分解</h2>
+          <div class="split-bars">
+            <div>
+              <div class="stack-label"><strong>Taichi</strong><span>105.87 us / step</span></div>
+              <div class="stack">
+                <div class="seg" style="--w:61.1%;--c:var(--blue);">Flux 64.67</div>
+                <div class="seg" style="--w:38.9%;--c:var(--teal);">Update 41.20</div>
+              </div>
+            </div>
+            <div>
+              <div class="stack-label"><strong>Native CUDA baseline</strong><span>177.18 us / step</span></div>
+              <div class="stack">
+                <div class="seg" style="--w:66.6%;--c:var(--red);">Flux 118.05</div>
+                <div class="seg" style="--w:33.4%;--c:var(--amber);">Update 59.14</div>
+              </div>
+            </div>
+            <div>
+              <div class="stack-label"><strong>Native CUDA best after agent</strong><span>~154.10 us / step</span></div>
+              <div class="stack">
+                <div class="seg" style="--w:70.4%;--c:var(--violet);">Flux 108.51</div>
+                <div class="seg" style="--w:29.6%;--c:var(--green);">Update 45.58</div>
+              </div>
+            </div>
+          </div>
+          <div class="legend">
+            <span style="--c:var(--blue);">Taichi flux</span>
+            <span style="--c:var(--red);">baseline flux</span>
+            <span style="--c:var(--violet);">agent best flux</span>
+            <span style="--c:var(--teal);">update</span>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2>Gap 定量</h2>
+          <div class="metric-row">
+            <div class="metric-label">Native baseline 总体慢于 Taichi</div>
+            <div class="metric-value red">1.67x</div>
+          </div>
+          <div class="metric-row">
+            <div class="metric-label">Baseline Flux 慢于 Taichi Flux</div>
+            <div class="metric-value red">1.83x</div>
+          </div>
+          <div class="metric-row">
+            <div class="metric-label">Agent-best Flux 仍慢于 Taichi Flux</div>
+            <div class="metric-value violet">1.68x</div>
+          </div>
+          <div class="metric-row">
+            <div class="metric-label">深挖 NCU 同指标集下 v42 Flux 慢于 Taichi</div>
+            <div class="metric-value blue">1.32x</div>
+          </div>
+          <div class="metric-row">
+            <div class="metric-label">Agent 后剩余 Flux 差值</div>
+            <div class="metric-value amber">~44 us</div>
+          </div>
+          <div class="callout amber" style="margin-top:18px;">
+            结论：20w cell 下主要瓶颈不是 launch overhead，而是 CalculateFluxKernel 内部的指令量、分支谓词和重复计算。
+          </div>
+        </div>
+      </div>
+
+      <footer class="source">
+        <span>数据源：results/ncu_results.jsonl + best native NCU spot check</span>
+        <span>Case: F2_207K_fp64</span>
+      </footer>
+    </section>
+
+    <section class="slide">
+      <header>
+        <div>
+          <div class="eyebrow">E2E Launch Path Optimization</div>
+          <h1>Taichi Kernel + CUDA Graph：消除 Python/runtime launch overhead</h1>
+          <p class="subtitle">这一层优化不改变 kernel 算法，而是把 Taichi step_fn 捕获成 CUDA Graph 后 replay。</p>
+        </div>
+        <div class="page">03 / 05</div>
+      </header>
+
+      <div class="grid-2">
+        <div class="panel">
+          <h2>我们怎么做</h2>
+          <ul>
+            <li>patch Taichi runtime，暴露 CUDA stream 与 capture 控制接口。</li>
+            <li>将 Taichi launch 路由到用户 stream：<code>cuda_set_stream()</code>。</li>
+            <li>capture 期间跳过不允许的 sync：<code>cuda_set_capture_active()</code>。</li>
+            <li>使用 bump allocator pool，避免 capture 中的 <code>cuMemAllocAsync</code>。</li>
+            <li>复用 persistent arg/result buffers，减少每次 launch 的分配和 H2D 参数拷贝。</li>
+            <li>小 mesh 支持 multi-step capture，一个 graph launch 执行多个 timestep。</li>
+          </ul>
+          <div class="callout blue" style="margin-top:18px;">
+            Vanilla Taichi 直接 stream capture 会遇到 CUDA_ERROR_STREAM_CAPTURE_IMPLICIT；patch 后可以从 Python 捕获并 replay Taichi kernel。
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2>E2E 结果</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>Case</th>
+                <th class="num">Pure Taichi</th>
+                <th class="num">Patched + Graph</th>
+                <th class="num">Speedup</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td>F1_6.7K_fp32</td><td class="num">53.58 us</td><td class="num">6.67 us</td><td class="num"><span class="badge green">8.03x</span></td></tr>
+              <tr><td>F1_6.7K_fp64</td><td class="num">53.89 us</td><td class="num">8.83 us</td><td class="num"><span class="badge green">6.10x</span></td></tr>
+              <tr><td>F2_24K_fp64</td><td class="num">57.50 us</td><td class="num">12.59 us</td><td class="num"><span class="badge green">4.57x</span></td></tr>
+              <tr><td>F2_207K_fp64</td><td class="num">122.97 us</td><td class="num">115.58 us</td><td class="num"><span class="badge amber">1.06x</span></td></tr>
+            </tbody>
+          </table>
+          <div class="callout" style="margin-top:18px;">
+            小 case 是 launch-overhead bound，所以 CUDA Graph 提升很大；207K case 已经 kernel-bound，graph 只带来约 1.06x。
+          </div>
+        </div>
+      </div>
+
+      <footer class="source">
+        <span>实现：/home/scratch.huanhuanc_gpu/spmd/taichi-graph-patch</span>
+        <span>脚本：run_taichi_graph.py</span>
+      </footer>
+    </section>
+
+    <section class="slide">
+      <header>
+        <div>
+          <div class="eyebrow">Why Native Flux Is Slower</div>
+          <h1>为什么 Taichi Flux 更快：动态执行路径更轻</h1>
+          <p class="subtitle">静态 SASS 里 Taichi 并不更短；真正差异来自运行时执行的 FP64 指令、分支谓词和 lane 利用率。</p>
+        </div>
+        <div class="page">04 / 05</div>
+      </header>
+
+      <div class="grid-2">
+        <div class="panel">
+          <h2>NCU dynamic profile</h2>
+          <table class="compact">
+            <thead>
+              <tr>
+                <th>Metric</th>
+                <th class="num">Taichi</th>
+                <th class="num">native v0</th>
+                <th class="num">Aker v42</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td>Flux time</td><td class="num">84.7 us</td><td class="num">117.9 us</td><td class="num">111.7 us</td></tr>
+              <tr><td>Warp SASS inst</td><td class="num">12.4M</td><td class="num">20.2M</td><td class="num">19.5M</td></tr>
+              <tr><td>FP64 pred-on inst</td><td class="num">50.4M</td><td class="num">85.6M</td><td class="num">83.5M</td></tr>
+              <tr><td>DADD/DMUL/DFMA</td><td class="num">38.6M</td><td class="num">70.5M</td><td class="num">68.5M</td></tr>
+              <tr><td>Branch warp inst</td><td class="num">740K</td><td class="num">1068K</td><td class="num">1045K</td></tr>
+              <tr><td>DRAM read/write</td><td class="num">36.3 / 36.2 MB</td><td class="num">40.1 / 37.0 MB</td><td class="num">39.9 / 36.8 MB</td></tr>
+              <tr><td>Active threads / inst</td><td class="num">16.0</td><td class="num">11.8</td><td class="num">11.9</td></tr>
+              <tr><td>Registers / thread</td><td class="num">80</td><td class="num">62</td><td class="num">64</td></tr>
+            </tbody>
+          </table>
+          <div class="mini-note">这组 profile 使用同一组 NCU metrics；绝对时间会受 profiler 影响，ratio 和动态指令结构更重要。</div>
+        </div>
+
+        <div class="panel">
+          <h2>v42 相对 Taichi 的残余开销</h2>
+          <div class="bar-chart">
+            <div class="bar-row">
+              <div class="bar-label">Warp inst</div>
+              <div class="track"><div class="bar" style="--w:78%;--c:var(--red);"></div></div>
+              <div class="bar-value">1.56x</div>
+            </div>
+            <div class="bar-row">
+              <div class="bar-label">FP64 inst</div>
+              <div class="track"><div class="bar" style="--w:83%;--c:var(--amber);"></div></div>
+              <div class="bar-value">1.66x</div>
+            </div>
+            <div class="bar-row">
+              <div class="bar-label">DADD/DMUL/DFMA</div>
+              <div class="track"><div class="bar" style="--w:89%;--c:var(--violet);"></div></div>
+              <div class="bar-value">1.77x</div>
+            </div>
+            <div class="bar-row">
+              <div class="bar-label">Branch</div>
+              <div class="track"><div class="bar" style="--w:71%;--c:var(--red);"></div></div>
+              <div class="bar-value">1.41x</div>
+            </div>
+            <div class="bar-row">
+              <div class="bar-label">Lane use</div>
+              <div class="track"><div class="bar" style="--w:74%;--c:var(--teal);"></div></div>
+              <div class="bar-value">0.74x</div>
+            </div>
+          </div>
+          <div class="callout amber" style="margin-top:20px;">
+            Taichi 快不是因为 register 更少或 bandwidth 更低；它在实际路径上执行了更少 FP64 算术和分支，并且每条指令平均有更多 active lanes。
+          </div>
+          <ul style="margin-top:16px;">
+            <li>优先减少 OSHER / boundary helper 的重复 FP64 计算。</li>
+            <li>降低 branch/predicate work，而不是只缓存 global load。</li>
+            <li>大范围 flux rewrite 可能改变 FP 顺序，需要单独 experimental track。</li>
+          </ul>
+        </div>
+      </div>
+
+      <footer class="source">
+        <span>结论：剩余性能空间主要在 Flux kernel 内部</span>
+        <span>数据源：profile_sass/ncu_dynamic/summary.md</span>
+      </footer>
+    </section>
+
+    <section class="slide">
+      <header>
+        <div>
+          <div class="eyebrow">Agent-Based CUDA Optimization</div>
+          <h1>Agent 自动优化：bit-exact 约束下已有 1.11x 初步提升</h1>
+          <p class="subtitle">搜索空间限制为 native CUDA 的安全局部优化，所有成功节点必须与 frozen native v0 完全一致。</p>
+        </div>
+        <div class="page">05 / 05</div>
+      </header>
+
+      <div class="grid-2">
+        <div class="panel">
+          <h2>当前 best</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>Version</th>
+                <th class="num">Async</th>
+                <th class="num">CUDA Graph</th>
+                <th class="num">Speedup</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td>v0 native CUDA</td><td class="num">161.85 us</td><td class="num">147.11 us</td><td class="num">1.00x</td></tr>
+              <tr><td><strong>v42_rowoff</strong></td><td class="num"><strong>146.23 us</strong></td><td class="num"><strong>131.89 us</strong></td><td class="num"><span class="badge green">1.11x</span></td></tr>
+            </tbody>
+          </table>
+          <div class="timeline">
+            <div class="step-card">
+              <div class="top">Validation</div>
+              <div class="big" style="color:var(--green);">exact</div>
+              <div class="desc">H/U/V/Z/W/F0-F3 全字段 max_abs=0</div>
+            </div>
+            <div class="step-card">
+              <div class="top">Steps</div>
+              <div class="big" style="color:var(--blue);">7199</div>
+              <div class="desc">包含长步数 checkpoint</div>
+            </div>
+            <div class="step-card">
+              <div class="top">Best action</div>
+              <div class="big" style="color:var(--teal);">rowoff</div>
+              <div class="desc">缓存 KLAS3 boundary table row offset</div>
+            </div>
+            <div class="step-card">
+              <div class="top">Residual</div>
+              <div class="big" style="color:var(--amber);">flux</div>
+              <div class="desc">主要 gap 仍在 CalculateFluxKernel</div>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <div class="quote">
+            当前 agent 已经能自动找到安全的 CUDA micro-optimization；但它还没有改变 flux kernel 的整体代码形态。
+          </div>
+          <div class="panel flat" style="margin-top:18px;">
+            <h2>下一步</h2>
+            <ul>
+              <li>继续保持 exact-preserving track，用于可交付优化。</li>
+              <li>另开 experimental track，允许更大范围的 flux rewrite。</li>
+              <li>如果改变浮点运算顺序，需要定义 relaxed numerical validation，而不能混入 exact leaderboard。</li>
+              <li>重点目标：减少 branch/predicate waste、数组 scratch、重复 helper 计算。</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <footer class="source">
+        <span>数据源：Aker/tasks/hydro_f2_207k_fp64/leaderboard.jsonl</span>
+        <span>Best node: v42_rowoff</span>
+      </footer>
+    </section>
+  </main>
+
+  <nav class="nav" aria-label="slide navigation">
+    <button type="button" id="prev" aria-label="上一页">‹</button>
+    <div class="dots" id="dots"></div>
+    <button type="button" id="next" aria-label="下一页">›</button>
+  </nav>
+
+  <script>
+    const slides = Array.from(document.querySelectorAll(".slide"));
+    const dots = document.getElementById("dots");
+    let index = 0;
+
+    slides.forEach((_, i) => {
+      const dot = document.createElement("span");
+      dot.className = "dot" + (i === 0 ? " active" : "");
+      dots.appendChild(dot);
+    });
+
+    const dotEls = Array.from(document.querySelectorAll(".dot"));
+
+    function show(nextIndex) {
+      index = Math.max(0, Math.min(slides.length - 1, nextIndex));
+      slides.forEach((slide, i) => slide.classList.toggle("active", i === index));
+      dotEls.forEach((dot, i) => dot.classList.toggle("active", i === index));
+    }
+
+    document.getElementById("prev").addEventListener("click", () => show(index - 1));
+    document.getElementById("next").addEventListener("click", () => show(index + 1));
+    window.addEventListener("keydown", (event) => {
+      if (event.key === "ArrowLeft") show(index - 1);
+      if (event.key === "ArrowRight" || event.key === " ") show(index + 1);
+    });
+  </script>
+</body>
+</html>

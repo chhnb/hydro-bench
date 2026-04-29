@@ -1,0 +1,182 @@
+[IR_DUMP] Saved optimized IR to /tmp/taichi_opt_ir_000.ll
+[PTX_DUMP] Saved 69534 bytes to /tmp/taichi_ptx_000.ptx
+[IR_DUMP] Saved optimized IR to /tmp/taichi_opt_ir_001.ll
+[PTX_DUMP] Saved 1744 bytes to /tmp/taichi_ptx_001.ptx
+[IR_DUMP] Saved optimized IR to /tmp/taichi_opt_ir_002.ll
+[PTX_DUMP] Saved 1928 bytes to /tmp/taichi_ptx_002.ptx
+[IR_DUMP] Saved optimized IR to /tmp/taichi_opt_ir_003.ll
+[PTX_DUMP] Saved 1769 bytes to /tmp/taichi_ptx_003.ptx
+[IR_DUMP] Saved optimized IR to /tmp/taichi_opt_ir_004.ll
+[PTX_DUMP] Saved 1770 bytes to /tmp/taichi_ptx_004.ptx
+[IR_DUMP] Saved optimized IR to /tmp/taichi_opt_ir_005.ll
+[PTX_DUMP] Saved 1770 bytes to /tmp/taichi_ptx_005.ptx
+[IR_DUMP] Saved optimized IR to /tmp/taichi_opt_ir_006.ll
+[PTX_DUMP] Saved 1770 bytes to /tmp/taichi_ptx_006.ptx
+[IR_DUMP] Saved optimized IR to /tmp/taichi_opt_ir_007.ll
+[PTX_DUMP] Saved 1770 bytes to /tmp/taichi_ptx_007.ptx
+[IR_DUMP] Saved optimized IR to /tmp/taichi_opt_ir_008.ll
+[PTX_DUMP] Saved 1770 bytes to /tmp/taichi_ptx_008.ptx
+[IR_DUMP] Saved optimized IR to /tmp/taichi_opt_ir_009.ll
+[PTX_DUMP] Saved 1770 bytes to /tmp/taichi_ptx_009.ptx
+[IR_DUMP] Saved optimized IR to /tmp/taichi_opt_ir_010.ll
+[PTX_DUMP] Saved 1770 bytes to /tmp/taichi_ptx_010.ptx
+[IR_DUMP] Saved optimized IR to /tmp/taichi_opt_ir_011.ll
+[PTX_DUMP] Saved 1776 bytes to /tmp/taichi_ptx_011.ptx
+[IR_DUMP] Saved optimized IR to /tmp/taichi_opt_ir_012.ll
+[PTX_DUMP] Saved 1776 bytes to /tmp/taichi_ptx_012.ptx
+[IR_DUMP] Saved optimized IR to /tmp/taichi_opt_ir_013.ll
+[PTX_DUMP] Saved 1776 bytes to /tmp/taichi_ptx_013.ptx
+[IR_DUMP] Saved optimized IR to /tmp/taichi_opt_ir_014.ll
+[PTX_DUMP] Saved 1776 bytes to /tmp/taichi_ptx_014.ptx
+[IR_DUMP] Saved optimized IR to /tmp/taichi_opt_ir_015.ll
+[PTX_DUMP] Saved 1776 bytes to /tmp/taichi_ptx_015.ptx
+[IR_DUMP] Saved optimized IR to /tmp/taichi_opt_ir_016.ll
+[PTX_DUMP] Saved 1776 bytes to /tmp/taichi_ptx_016.ptx
+[IR_DUMP] Saved optimized IR to /tmp/taichi_opt_ir_017.ll
+[PTX_DUMP] Saved 1776 bytes to /tmp/taichi_ptx_017.ptx
+[IR_DUMP] Saved optimized IR to /tmp/taichi_opt_ir_018.ll
+[PTX_DUMP] Saved 1759 bytes to /tmp/taichi_ptx_018.ptx
+[IR_DUMP] Saved optimized IR to /tmp/taichi_opt_ir_019.ll
+[PTX_DUMP] Saved 1780 bytes to /tmp/taichi_ptx_019.ptx
+[IR_DUMP] Saved optimized IR to /tmp/taichi_opt_ir_020.ll
+[PTX_DUMP] Saved 1781 bytes to /tmp/taichi_ptx_020.ptx
+[IR_DUMP] Saved optimized IR to /tmp/taichi_opt_ir_021.ll
+[PTX_DUMP] Saved 1781 bytes to /tmp/taichi_ptx_021.ptx
+[IR_DUMP] Saved optimized IR to /tmp/taichi_opt_ir_022.ll
+[PTX_DUMP] Saved 1781 bytes to /tmp/taichi_ptx_022.ptx
+[IR_DUMP] Saved optimized IR to /tmp/taichi_opt_ir_023.ll
+[PTX_DUMP] Saved 1781 bytes to /tmp/taichi_ptx_023.ptx
+[IR_DUMP] Saved optimized IR to /tmp/taichi_opt_ir_024.ll
+[PTX_DUMP] Saved 1781 bytes to /tmp/taichi_ptx_024.ptx
+/home/scratch.huanhuanc_gpu/hydro-bench/taichi_impl/F2_hydro_taichi_fp64.py:381: SyntaxWarning: You are unrolling more than
+                        32 iterations, so the compile time may be extremely long.
+                        You can use a non-static for loop if you want to decrease the compile time.
+                        You can disable this warning by setting ti.init(unrolling_limit=0).
+  for i in ti.static(range(max(NHQ - 1, 1))):
+[W 04/28/26 22:28:07.928 271159] [alg_simp.cpp:optimize_division@432] Potential division by 0
+File "/home/scratch.huanhuanc_gpu/hydro-bench/taichi_impl/F2_hydro_taichi_fp64.py", line 496, in bounda_klas7:
+            f1 = CB * copysign_native(CQ * CQ / HB, CQ)
+                                      ^^^^^^^^^^^^
+
+[W 04/28/26 22:28:07.939 271159] [alg_simp.cpp:optimize_division@432] Potential division by 0
+File "/home/scratch.huanhuanc_gpu/hydro-bench/taichi_impl/F2_hydro_taichi_fp64.py", line 496, in bounda_klas7:
+            f1 = CB * copysign_native(CQ * CQ / HB, CQ)
+                                      ^^^^^^^^^^^^
+
+[W 04/28/26 22:28:33.443 271159] [alg_simp.cpp:optimize_division@432] Potential division by 0
+File "/home/scratch.huanhuanc_gpu/hydro-bench/taichi_impl/F2_hydro_taichi_fp64.py", line 496, in bounda_klas7:
+            f1 = CB * copysign_native(CQ * CQ / HB, CQ)
+                                      ^^^^^^^^^^^^
+
+[W 04/28/26 22:28:33.445 271159] [alg_simp.cpp:optimize_division@432] Potential division by 0
+File "/home/scratch.huanhuanc_gpu/hydro-bench/taichi_impl/F2_hydro_taichi_fp64.py", line 496, in bounda_klas7:
+            f1 = CB * copysign_native(CQ * CQ / HB, CQ)
+                                      ^^^^^^^^^^^^
+
+[W 04/28/26 22:28:33.779 271159] [alg_simp.cpp:optimize_division@432] Potential division by 0
+File "/home/scratch.huanhuanc_gpu/hydro-bench/taichi_impl/F2_hydro_taichi_fp64.py", line 496, in bounda_klas7:
+            f1 = CB * copysign_native(CQ * CQ / HB, CQ)
+                                      ^^^^^^^^^^^^
+
+[W 04/28/26 22:28:33.841 271159] [alg_simp.cpp:optimize_division@432] Potential division by 0
+File "/home/scratch.huanhuanc_gpu/hydro-bench/taichi_impl/F2_hydro_taichi_fp64.py", line 496, in bounda_klas7:
+            f1 = CB * copysign_native(CQ * CQ / HB, CQ)
+                                      ^^^^^^^^^^^^
+
+[W 04/28/26 22:28:33.951 271159] [alg_simp.cpp:optimize_division@432] Potential division by 0
+File "/home/scratch.huanhuanc_gpu/hydro-bench/taichi_impl/F2_hydro_taichi_fp64.py", line 496, in bounda_klas7:
+            f1 = CB * copysign_native(CQ * CQ / HB, CQ)
+                                      ^^^^^^^^^^^^
+
+[W 04/28/26 22:28:40.383 271159] [alg_simp.cpp:optimize_division@432] Potential division by 0
+File "/home/scratch.huanhuanc_gpu/hydro-bench/taichi_impl/F2_hydro_taichi_fp64.py", line 496, in bounda_klas7:
+            f1 = CB * copysign_native(CQ * CQ / HB, CQ)
+                                      ^^^^^^^^^^^^
+
+[W 04/28/26 22:28:40.431 271159] [alg_simp.cpp:optimize_division@432] Potential division by 0
+File "/home/scratch.huanhuanc_gpu/hydro-bench/taichi_impl/F2_hydro_taichi_fp64.py", line 496, in bounda_klas7:
+            f1 = CB * copysign_native(CQ * CQ / HB, CQ)
+                                      ^^^^^^^^^^^^
+
+[W 04/28/26 22:28:40.533 271159] [alg_simp.cpp:optimize_division@432] Potential division by 0
+File "/home/scratch.huanhuanc_gpu/hydro-bench/taichi_impl/F2_hydro_taichi_fp64.py", line 496, in bounda_klas7:
+            f1 = CB * copysign_native(CQ * CQ / HB, CQ)
+                                      ^^^^^^^^^^^^
+
+[W 04/28/26 22:28:42.962 271159] [alg_simp.cpp:optimize_division@432] Potential division by 0
+File "/home/scratch.huanhuanc_gpu/hydro-bench/taichi_impl/F2_hydro_taichi_fp64.py", line 496, in bounda_klas7:
+            f1 = CB * copysign_native(CQ * CQ / HB, CQ)
+                                      ^^^^^^^^^^^^
+
+[W 04/28/26 22:28:43.188 271185] [alg_simp.cpp:optimize_division@432] Potential division by 0
+File "/home/scratch.huanhuanc_gpu/hydro-bench/taichi_impl/F2_hydro_taichi_fp64.py", line 496, in bounda_klas7:
+            f1 = CB * copysign_native(CQ * CQ / HB, CQ)
+                                      ^^^^^^^^^^^^
+
+[W 04/28/26 22:28:45.325 271185] [alg_simp.cpp:optimize_division@432] Potential division by 0
+File "/home/scratch.huanhuanc_gpu/hydro-bench/taichi_impl/F2_hydro_taichi_fp64.py", line 496, in bounda_klas7:
+            f1 = CB * copysign_native(CQ * CQ / HB, CQ)
+                                      ^^^^^^^^^^^^
+
+[W 04/28/26 22:28:47.361 271185] [alg_simp.cpp:optimize_division@432] Potential division by 0
+File "/home/scratch.huanhuanc_gpu/hydro-bench/taichi_impl/F2_hydro_taichi_fp64.py", line 496, in bounda_klas7:
+            f1 = CB * copysign_native(CQ * CQ / HB, CQ)
+                                      ^^^^^^^^^^^^
+
+[W 04/28/26 22:28:47.375 271185] [alg_simp.cpp:optimize_division@432] Potential division by 0
+File "/home/scratch.huanhuanc_gpu/hydro-bench/taichi_impl/F2_hydro_taichi_fp64.py", line 496, in bounda_klas7:
+            f1 = CB * copysign_native(CQ * CQ / HB, CQ)
+                                      ^^^^^^^^^^^^
+
+[W 04/28/26 22:28:47.378 271185] [alg_simp.cpp:optimize_division@432] Potential division by 0
+File "/home/scratch.huanhuanc_gpu/hydro-bench/taichi_impl/F2_hydro_taichi_fp64.py", line 496, in bounda_klas7:
+            f1 = CB * copysign_native(CQ * CQ / HB, CQ)
+                                      ^^^^^^^^^^^^
+
+[W 04/28/26 22:28:50.861 271185] [alg_simp.cpp:optimize_division@432] Potential division by 0
+File "/home/scratch.huanhuanc_gpu/hydro-bench/taichi_impl/F2_hydro_taichi_fp64.py", line 496, in bounda_klas7:
+            f1 = CB * copysign_native(CQ * CQ / HB, CQ)
+                                      ^^^^^^^^^^^^
+
+[W 04/28/26 22:28:50.863 271185] [alg_simp.cpp:optimize_division@432] Potential division by 0
+File "/home/scratch.huanhuanc_gpu/hydro-bench/taichi_impl/F2_hydro_taichi_fp64.py", line 496, in bounda_klas7:
+            f1 = CB * copysign_native(CQ * CQ / HB, CQ)
+                                      ^^^^^^^^^^^^
+
+[W 04/28/26 22:28:50.894 271185] [alg_simp.cpp:optimize_division@432] Potential division by 0
+File "/home/scratch.huanhuanc_gpu/hydro-bench/taichi_impl/F2_hydro_taichi_fp64.py", line 496, in bounda_klas7:
+            f1 = CB * copysign_native(CQ * CQ / HB, CQ)
+                                      ^^^^^^^^^^^^
+
+[W 04/28/26 22:28:50.942 271185] [alg_simp.cpp:optimize_division@432] Potential division by 0
+File "/home/scratch.huanhuanc_gpu/hydro-bench/taichi_impl/F2_hydro_taichi_fp64.py", line 496, in bounda_klas7:
+            f1 = CB * copysign_native(CQ * CQ / HB, CQ)
+                                      ^^^^^^^^^^^^
+
+[W 04/28/26 22:28:52.977 271185] [alg_simp.cpp:optimize_division@432] Potential division by 0
+File "/home/scratch.huanhuanc_gpu/hydro-bench/taichi_impl/F2_hydro_taichi_fp64.py", line 496, in bounda_klas7:
+            f1 = CB * copysign_native(CQ * CQ / HB, CQ)
+                                      ^^^^^^^^^^^^
+
+[W 04/28/26 22:28:53.011 271185] [alg_simp.cpp:optimize_division@432] Potential division by 0
+File "/home/scratch.huanhuanc_gpu/hydro-bench/taichi_impl/F2_hydro_taichi_fp64.py", line 496, in bounda_klas7:
+            f1 = CB * copysign_native(CQ * CQ / HB, CQ)
+                                      ^^^^^^^^^^^^
+
+[IR_DUMP] Saved optimized IR to /tmp/taichi_opt_ir_025.ll
+[PTX_DUMP] Saved 412306 bytes to /tmp/taichi_ptx_025.ptx
+[IR_DUMP] Saved optimized IR to /tmp/taichi_opt_ir_026.ll
+[PTX_DUMP] Saved 18911 bytes to /tmp/taichi_ptx_026.ptx
+[IR_DUMP] Saved optimized IR to /tmp/taichi_opt_ir_027.ll
+[PTX_DUMP] Saved 1594 bytes to /tmp/taichi_ptx_027.ptx
+[IR_DUMP] Saved optimized IR to /tmp/taichi_opt_ir_028.ll
+[PTX_DUMP] Saved 1594 bytes to /tmp/taichi_ptx_028.ptx
+[IR_DUMP] Saved optimized IR to /tmp/taichi_opt_ir_029.ll
+[PTX_DUMP] Saved 1594 bytes to /tmp/taichi_ptx_029.ptx
+[IR_DUMP] Saved optimized IR to /tmp/taichi_opt_ir_030.ll
+[PTX_DUMP] Saved 1594 bytes to /tmp/taichi_ptx_030.ptx
+[IR_DUMP] Saved optimized IR to /tmp/taichi_opt_ir_031.ll
+[PTX_DUMP] Saved 1774 bytes to /tmp/taichi_ptx_031.ptx
+[Taichi] version 1.8.0, llvm 15.0.4, commit ba0e81dc, linux, python 3.12.13
+[Taichi] Starting on arch=cuda
+RESULT={"case": "F2_207K_fp64", "us_per_step": 153.18900113925338, "steps": 1, "h_first5": [10.168467000256305, 10.186533000179633, 10.24830100001834, 0.001, 0.001], "framework": "taichi"}

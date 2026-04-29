@@ -1,0 +1,7 @@
+ptxas info    : 0 bytes gmem
+ptxas info    : Compiling entry function 'calculate_flux_c80_0_kernel_0_range_for' for 'sm_80'
+ptxas info    : Function properties for calculate_flux_c80_0_kernel_0_range_for
+    32 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 80 registers, used 0 barriers, 32 bytes cumulative stack size, 384 bytes cmem[0], 424 bytes cmem[2]
+ptxas info    : Function properties for function_body
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads

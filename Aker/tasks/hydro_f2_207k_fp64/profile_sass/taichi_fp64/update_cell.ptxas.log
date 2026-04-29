@@ -1,0 +1,5 @@
+ptxas info    : 0 bytes gmem
+ptxas info    : Compiling entry function 'update_cell_c82_0_kernel_0_range_for' for 'sm_80'
+ptxas info    : Function properties for update_cell_c82_0_kernel_0_range_for
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 88 registers, used 0 barriers, 384 bytes cmem[0], 224 bytes cmem[2]
