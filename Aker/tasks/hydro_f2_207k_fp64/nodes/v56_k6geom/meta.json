@@ -1,0 +1,16 @@
+{
+  "node_id": "v56_k6geom",
+  "parents": [
+    "v42_rowoff"
+  ],
+  "action": "mutate",
+  "direction": "pass cached side-normal geometry into KLAS6 boundary helper on the row-offset parent",
+  "techniques": [
+    "load_reuse",
+    "helper_argument_reuse",
+    "register_caching",
+    "boundary_helper_cleanup"
+  ],
+  "rationale": "CalculateFluxKernel already loads sides.COSF[idx] and sides.SINF[idx] into COSJ and SINJ for every side, but the KLAS6 boundary helper reloads the same immutable side-normal geometry while projecting neighbor velocity. Passing the cached values through BOUNDA removes redundant global geometry reads on KLAS6 boundary sides while preserving the projection expressions and operand order.",
+  "attempt_status": "OK"
+}
