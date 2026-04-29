@@ -1,0 +1,15 @@
+{
+  "node_id": "v98_k5f0",
+  "parents": [
+    "v42_rowoff"
+  ],
+  "action": "mutate",
+  "direction": "reuse freshly computed KLAS5 FLR0 locally",
+  "techniques": [
+    "store_forwarding_avoidance",
+    "register_caching",
+    "boundary_helper_cleanup"
+  ],
+  "rationale": "The KLAS5 arm inside BOUNDA stores FLR(0) as H_pre * QL[1] and immediately reads the same macro-backed value to form FLR(1). Keeping the freshly computed flux0 in a local register removes that read-back while preserving the same multiplication operands and order.",
+  "attempt_status": "OK"
+}
