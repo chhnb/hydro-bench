@@ -1,0 +1,15 @@
+{
+  "node_id": "v64_revnorm",
+  "parents": [
+    "v42_rowoff"
+  ],
+  "action": "mutate",
+  "direction": "initialize reverse-edge normal geometry registers directly",
+  "techniques": [
+    "dead_store_elimination",
+    "register_lifetime_cleanup",
+    "internal_edge_cleanup"
+  ],
+  "rationale": "The reverse internal-edge branch initializes COSJ1 and SINJ1 to 0.0 and immediately overwrites them with -COSJ and -SINJ before any use. Declaring those local normal-geometry registers directly with their final values removes redundant stores and shortens the live setup sequence without changing any flux expression or operand order.",
+  "attempt_status": "OK"
+}
