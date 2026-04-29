@@ -1,0 +1,15 @@
+{
+  "node_id": "v88_k1osneg",
+  "parents": [
+    "v75_k1args"
+  ],
+  "action": "mutate",
+  "direction": "cache OSHER negative classification thresholds on the KLAS1-index parent",
+  "techniques": [
+    "scalar_cse",
+    "register_caching",
+    "osher_classification"
+  ],
+  "rationale": "OSHER in v75_k1args forms the same -CA and -CR thresholds multiple times while classifying K2 and K1. Caching those negated Real values once removes duplicate unary FP64 work in the branch chain while preserving comparison order and all flux expressions.",
+  "attempt_status": "OK"
+}
