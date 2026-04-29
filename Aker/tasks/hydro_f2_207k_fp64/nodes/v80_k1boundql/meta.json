@@ -1,0 +1,15 @@
+{
+  "node_id": "v80_k1boundql",
+  "parents": [
+    "v75_k1args"
+  ],
+  "action": "mutate",
+  "direction": "cache BOUNDA incoming normal velocity on the KLAS1-index parent",
+  "techniques": [
+    "load_reuse",
+    "register_caching",
+    "boundary_helper_cleanup"
+  ],
+  "rationale": "v75_k1args still reads QL[1] several times at the start of BOUNDA before any helper can mutate it. Caching that incoming normal velocity in a scalar removes repeated local-array reads on boundary sides while preserving branch order and flux multiplication order.",
+  "attempt_status": "OK"
+}
