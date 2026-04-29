@@ -1,0 +1,15 @@
+{
+  "node_id": "v83_k1k5jl",
+  "parents": [
+    "v75_k1args"
+  ],
+  "action": "mutate",
+  "direction": "cache KLAS5 JL factor on the KLAS1-index parent",
+  "techniques": [
+    "scalar_cse",
+    "register_caching",
+    "boundary_helper_cleanup"
+  ],
+  "rationale": "The v75_k1args BOUNDA KLAS5 arm forms 1.0 - mesh.JL twice in the same FLR3 product. Caching that scalar removes one FP64 subtraction and one repeated mesh scalar use on this boundary path while preserving the branch order and multiplication order.",
+  "attempt_status": "OK"
+}
