@@ -1,0 +1,15 @@
+{
+  "node_id": "v87_habsql",
+  "parents": [
+    "v42_rowoff"
+  ],
+  "action": "mutate",
+  "direction": "cache H1 times absolute owner normal velocity in bed-exposed flux branch",
+  "techniques": [
+    "scalar_cse",
+    "fp64_arithmetic_reduction",
+    "calculate_flux_cleanup"
+  ],
+  "rationale": "In the ZC <= cells.ZBC[pos] CalculateFluxKernel branch, v42_rowoff forms H1 * fabs(QL[1]) twice as the left-associated prefix for FLUX1 and FLUX2. Caching that exact prefix removes one fabs and one FP64 multiply on this branch while preserving the multiplication order for both stored flux expressions.",
+  "attempt_status": "OK"
+}
