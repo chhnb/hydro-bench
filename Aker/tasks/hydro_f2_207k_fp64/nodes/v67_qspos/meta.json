@@ -1,0 +1,15 @@
+{
+  "node_id": "v67_qspos",
+  "parents": [
+    "v42_rowoff"
+  ],
+  "action": "mutate",
+  "direction": "remove unused QS position argument",
+  "techniques": [
+    "unused_argument_cleanup",
+    "helper_signature_cleanup",
+    "osher_helper_cleanup"
+  ],
+  "rationale": "The QS helper template takes a pos argument that is never read, and OSHER only forwards its own pos value into QS calls. Removing the unused QS parameter and the forwarded call-site argument trims helper argument traffic in the OSHER path while preserving OSHER dispatch, branch order, and every flux expression.",
+  "attempt_status": "OK"
+}
