@@ -1,0 +1,15 @@
+{
+  "node_id": "v75_k1args",
+  "parents": [
+    "v42_rowoff"
+  ],
+  "action": "mutate",
+  "direction": "cache KLAS1 boundary time-series index",
+  "techniques": [
+    "integer_cse",
+    "index_reuse",
+    "boundary_helper_cleanup"
+  ],
+  "rationale": "CalculateKlas1 computes jt * mesh.CELL + pos separately for the ZT and DZT boundary time-series loads. Caching that integer index removes duplicate address arithmetic while preserving the same array elements and all floating-point expressions.",
+  "attempt_status": "OK"
+}
