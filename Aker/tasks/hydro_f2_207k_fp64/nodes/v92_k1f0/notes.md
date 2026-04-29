@@ -31,3 +31,6 @@ Host-side broker validation is pending. meta.json intentionally sets attempt_sta
 
 ## Host validation
 - host validation: existing OK reports reused
+
+## Host validation
+- host validation: existing OK reports reused
