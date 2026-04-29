@@ -1,0 +1,15 @@
+{
+  "node_id": "v42_rowoff",
+  "parents": [
+    "v27_ratio_reg"
+  ],
+  "action": "mutate",
+  "direction": "cache KLAS3 boundary table row offset",
+  "techniques": [
+    "integer_cse",
+    "index_reuse",
+    "boundary_helper_cleanup"
+  ],
+  "rationale": "CalculateKlas3 computes size_t(pos) * size_t(mesh.NHQ) separately for the QW and ZW boundary table row pointers. Caching that row offset in a local variable removes duplicate integer address arithmetic while preserving the same QW_row and ZW_row addresses and all floating-point expressions.",
+  "attempt_status": "OK"
+}
