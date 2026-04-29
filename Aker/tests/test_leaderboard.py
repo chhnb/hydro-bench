@@ -3,7 +3,7 @@
 Exercises:
 
 - `commit_row` assembles a row from meta.json + report_*.json and
-  appends to leaderboard.jsonl.
+  upserts it into leaderboard.jsonl.
 - `leaderboard.md` is regenerated atomically, sorted ASC by
   runtime_ms_primary.
 - `attempt_status=FAIL` nodes are skipped (no row appended).
@@ -113,6 +113,21 @@ def test_fail_node_is_skipped() -> None:
         print("[skip  ] OK FAIL node skipped")
 
 
+def test_commit_is_idempotent_by_node_id() -> None:
+    with tempfile.TemporaryDirectory() as td_str:
+        td = Path(td_str)
+        (td / "nodes").mkdir()
+        _make_node(td, "v0_naive_cuda", mean_ms=2.5, status="OK")
+        commit_row(td, "v0_naive_cuda")
+        commit_row(td, "v0_naive_cuda")
+
+        jsonl = (td / "leaderboard.jsonl").read_text().splitlines()
+        assert len(jsonl) == 1, f"duplicate commit should upsert, got {len(jsonl)} rows"
+        row = json.loads(jsonl[0])
+        assert row["node_id"] == "v0_naive_cuda"
+        print("[idem  ] OK repeated commit upserts by node_id")
+
+
 def test_malformed_raises() -> None:
     with tempfile.TemporaryDirectory() as td_str:
         td = Path(td_str)
@@ -143,6 +158,7 @@ def test_regenerate_md_alone() -> None:
 def main() -> int:
     test_commit_and_regen()
     test_fail_node_is_skipped()
+    test_commit_is_idempotent_by_node_id()
     test_malformed_raises()
     test_regenerate_md_alone()
     print("all leaderboard tests passed")

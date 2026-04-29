@@ -6,7 +6,7 @@ main process calls `commit_row(task_dir, node_id)` to:
 
 1. Read the node's `meta.json` + `report_acc.json` + `report_perf.json`.
 2. Assemble a leaderboard row with the existing schema.
-3. Append the row to `leaderboard.jsonl`.
+3. Upsert the row in `leaderboard.jsonl` by `node_id`.
 4. Rewrite `leaderboard.md` from the full jsonl, sorted by
    runtime_ms_primary ASC.
 
@@ -58,7 +58,7 @@ def commit_row(task_dir: Path | str, node_id: str) -> dict[str, Any]:
     row = _assemble_row(node_id, meta, acc, perf)
 
     with leaderboard_lock(task_dir):
-        _append_jsonl(task_dir / LEADERBOARD_JSONL, row)
+        _upsert_jsonl(task_dir / LEADERBOARD_JSONL, row)
         _regenerate_md(task_dir)
     return row
 
@@ -127,9 +127,24 @@ def _read_json(path: Path) -> dict:
         raise LeaderboardError(f"cannot read {path}: {e}") from e
 
 
-def _append_jsonl(path: Path, row: dict) -> None:
-    with open(path, "a", encoding="utf-8") as fh:
-        fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+def _upsert_jsonl(path: Path, row: dict) -> None:
+    rows = _read_all_rows(path)
+    node_id = row.get("node_id")
+    out: list[dict] = []
+    replaced = False
+    for old in rows:
+        if old.get("node_id") == node_id:
+            if not replaced:
+                out.append(row)
+                replaced = True
+            continue
+        out.append(old)
+    if not replaced:
+        out.append(row)
+    path.write_text(
+        "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in out),
+        encoding="utf-8",
+    )
 
 
 def _regenerate_md(task_dir: Path) -> None:
