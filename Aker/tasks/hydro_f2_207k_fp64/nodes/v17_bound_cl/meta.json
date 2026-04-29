@@ -1,0 +1,15 @@
+{
+  "node_id": "v17_bound_cl",
+  "parents": [
+    "v16_osher_cl"
+  ],
+  "action": "mutate",
+  "direction": "pass caller-computed boundary wave speed into BOUNDA",
+  "techniques": [
+    "sqrt_reuse",
+    "register_caching",
+    "helper_argument_reuse"
+  ],
+  "rationale": "CalculateFluxKernel already computes CL as sqrt(9.81 * H1) before dispatching boundary sides to BOUNDA, but the parent BOUNDA helper recomputes sqrt(9.81 * H_pre) for the same supercritical boundary check. Passing the existing CL into BOUNDA removes that redundant square root on boundary sides while preserving the same comparison value and all flux arithmetic.",
+  "attempt_status": "OK"
+}
