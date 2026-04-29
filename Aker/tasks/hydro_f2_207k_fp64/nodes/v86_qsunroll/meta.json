@@ -1,0 +1,15 @@
+{
+  "node_id": "v86_qsunroll",
+  "parents": [
+    "v42_rowoff"
+  ],
+  "action": "mutate",
+  "direction": "unroll fixed QS flux accumulation",
+  "techniques": [
+    "loop_unrolling",
+    "osher_helper_cleanup",
+    "branch_overhead_reduction"
+  ],
+  "rationale": "The OSHER QS helper updates exactly four flux components with a fixed loop in every active template arm. Expanding those four accumulations removes loop counter and branch overhead in the hot OSHER helper while preserving the same per-component F[i] * j accumulation order and operands.",
+  "attempt_status": "OK"
+}
