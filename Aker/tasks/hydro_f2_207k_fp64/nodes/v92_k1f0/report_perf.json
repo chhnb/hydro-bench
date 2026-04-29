@@ -1,0 +1,35 @@
+{
+  "node_id": "v92_k1f0",
+  "status": "OK",
+  "measurements": [
+    {
+      "shape": "primary",
+      "mean_ms": 0.14709,
+      "steps": 100,
+      "repeat": 3,
+      "metric": "async_ms_per_step"
+    }
+  ],
+  "parsed": {
+    "raw_tail": "../BOUNDE/NZ/NZ0001.DAT\n------------------------ NQ=58, NDAYS=50 ---------------------------\n../BOUNDE/NQ/NQ0001.DAT\n../BOUNDE/NQ/NQ0002.DAT\n------------------------ NNZQ0=0, NZQ=0 ---------------------------\n=== F2 Hydro-Cal Native Benchmark (original kernel code) ===\nCELL=207234, steps=100, steps_per_day=7200, repeat=3\nGPU: NVIDIA A100 80GB PCIe, SMs=108\n\n--- Sync Loop ---\nSync:  median=14.773 ms, 147.73 us/step\n\n--- Async Loop ---\nAsync: median=14.709 ms, 147.09 us/step\n\n--- CUDA Graph ---\nGraph: median=13.190 ms, 131.90 us/step\n\n--- State after 100 steps (async) ---\nH range: [0.001000, 28.495618]\n\n",
+    "sync": {
+      "median_ms_total": 14.773,
+      "us_per_step": 147.73,
+      "ms_per_step": 0.14773
+    },
+    "async": {
+      "median_ms_total": 14.709,
+      "us_per_step": 147.09,
+      "ms_per_step": 0.14709
+    },
+    "graph": {
+      "median_ms_total": 13.19,
+      "us_per_step": 131.9,
+      "ms_per_step": 0.13190000000000002
+    },
+    "steps": 100
+  },
+  "returncode": 0,
+  "stdout_tail": "../BOUNDE/NZ/NZ0001.DAT\n------------------------ NQ=58, NDAYS=50 ---------------------------\n../BOUNDE/NQ/NQ0001.DAT\n../BOUNDE/NQ/NQ0002.DAT\n------------------------ NNZQ0=0, NZQ=0 ---------------------------\n=== F2 Hydro-Cal Native Benchmark (original kernel code) ===\nCELL=207234, steps=100, steps_per_day=7200, repeat=3\nGPU: NVIDIA A100 80GB PCIe, SMs=108\n\n--- Sync Loop ---\nSync:  median=14.773 ms, 147.73 us/step\n\n--- Async Loop ---\nAsync: median=14.709 ms, 147.09 us/step\n\n--- CUDA Graph ---\nGraph: median=13.190 ms, 131.90 us/step\n\n--- State after 100 steps (async) ---\nH range: [0.001000, 28.495618]\n",
+  "stderr_tail": ""
+}
