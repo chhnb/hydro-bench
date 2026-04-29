@@ -1,0 +1,15 @@
+{
+  "node_id": "v60_bounds",
+  "parents": [
+    "v42_rowoff"
+  ],
+  "action": "mutate",
+  "direction": "drop impossible negative-index checks in kernel bounds guards",
+  "techniques": [
+    "branch_simplification",
+    "bounds_check_cleanup",
+    "control_flow"
+  ],
+  "rationale": "CalculateFluxKernel and UpdateCellKernel derive idx and pos directly from CUDA block and thread indices, which are nonnegative for the configured launches. Removing the impossible idx < 0 and pos < 0 guard terms trims redundant control-flow predicates while keeping the same upper-bound exits and leaving all floating-point expressions untouched.",
+  "attempt_status": "OK"
+}
