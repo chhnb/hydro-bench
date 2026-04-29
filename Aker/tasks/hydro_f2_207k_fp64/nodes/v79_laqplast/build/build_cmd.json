@@ -1,0 +1,22 @@
+{
+  "cmd": [
+    "nvcc",
+    "-O3",
+    "-arch=sm_80",
+    "-rdc=true",
+    "--std=c++17",
+    "-I",
+    "/home/scratch.huanhuanc_gpu/hydro-bench/Aker/tasks/hydro_f2_207k_fp64/nodes/.v79_laqplast.tmp/build/work/hydro-cal-src/include",
+    "/home/scratch.huanhuanc_gpu/hydro-bench/Aker/tasks/hydro_f2_207k_fp64/nodes/.v79_laqplast.tmp/build/work/benchmark.cu",
+    "/home/scratch.huanhuanc_gpu/hydro-bench/Aker/tasks/hydro_f2_207k_fp64/nodes/.v79_laqplast.tmp/build/work/hydro-cal-src/src/functors.cu",
+    "/home/scratch.huanhuanc_gpu/hydro-bench/Aker/tasks/hydro_f2_207k_fp64/nodes/.v79_laqplast.tmp/build/work/hydro-cal-src/src/mesh.cpp",
+    "/home/scratch.huanhuanc_gpu/hydro-bench/Aker/tasks/hydro_f2_207k_fp64/nodes/.v79_laqplast.tmp/build/work/hydro-cal-src/src/cell.cpp",
+    "/home/scratch.huanhuanc_gpu/hydro-bench/Aker/tasks/hydro_f2_207k_fp64/nodes/.v79_laqplast.tmp/build/work/hydro-cal-src/src/side.cpp",
+    "-o",
+    "/home/scratch.huanhuanc_gpu/hydro-bench/Aker/tasks/hydro_f2_207k_fp64/nodes/.v79_laqplast.tmp/build/hydro_native_benchmark",
+    "-lcudadevrt"
+  ],
+  "returncode": 0,
+  "stdout": "",
+  "stderr": ""
+}

@@ -1,0 +1,15 @@
+{
+  "node_id": "v79_laqplast",
+  "parents": [
+    "v42_rowoff"
+  ],
+  "action": "mutate",
+  "direction": "cache LAQP high-row index and loop bound",
+  "techniques": [
+    "integer_cse",
+    "index_reuse",
+    "boundary_helper_cleanup"
+  ],
+  "rationale": "LAQP recomputes MS - 1 for the high-end boundary-table check and for each loop-bound test on KLAS3 boundary interpolation. Caching that integer last index removes redundant integer work in the helper while preserving the same QW/ZW addresses and all floating-point expressions.",
+  "attempt_status": "OK"
+}
