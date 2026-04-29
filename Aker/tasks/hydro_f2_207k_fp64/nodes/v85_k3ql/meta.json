@@ -1,0 +1,15 @@
+{
+  "node_id": "v85_k3ql",
+  "parents": [
+    "v75_k1args"
+  ],
+  "action": "mutate",
+  "direction": "reuse cached owner normal velocity in KLAS3 on the KLAS1-index parent",
+  "techniques": [
+    "projection_reuse",
+    "register_caching",
+    "boundary_helper_cleanup"
+  ],
+  "rationale": "CalculateFluxKernel already computes the owner-cell normal velocity in QL[1] before boundary dispatch. v75_k1args CalculateKlas3 reloads COSF/SINF and recomputes the same U_pre/COS plus V_pre/SIN projection only to form QZH3. Reusing QL[1] removes redundant geometry reads and FP64 multiply-add work while preserving the side-length multiply and all downstream flux arithmetic.",
+  "attempt_status": "OK"
+}
