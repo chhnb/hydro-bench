@@ -1,0 +1,15 @@
+{
+  "node_id": "v27_ratio_reg",
+  "parents": [
+    "v18_hb1_sqrt"
+  ],
+  "action": "mutate",
+  "direction": "reuse internal-edge depth ratio after OSHER calls",
+  "techniques": [
+    "division_reuse",
+    "register_caching",
+    "internal_edge_flux"
+  ],
+  "rationale": "CalculateFluxKernel computes fmin(HC / QR[0], 1.5) or fmin(HC2 / QR1[0], 1.5) to form the reconstructed normal velocity, then recomputes the same divide/min after OSHER to assemble FLR(1). Keeping the ratio in a local register removes a redundant division and min on internal edges without changing the flux operands.",
+  "attempt_status": "OK"
+}
