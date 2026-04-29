@@ -1,0 +1,15 @@
+{
+  "node_id": "v18_hb1_sqrt",
+  "parents": [
+    "v17_bound_cl"
+  ],
+  "action": "mutate",
+  "direction": "cache invariant HB1 square root in KLAS iterative boundary solves",
+  "techniques": [
+    "sqrt_reuse",
+    "loop_invariant_code_motion",
+    "register_caching"
+  ],
+  "rationale": "CalculateKlas1 and the iterative branch of CalculateKlas3 recompute sqrt(HB1) on every URB fixed-point iteration even though HB1 is fixed after its fmax clamp. Caching sqrt(HB1) once in a local register removes repeated square-root work while keeping the existing 6.264 multiplication and URB update expression order unchanged.",
+  "attempt_status": "OK"
+}

@@ -1,0 +1,45 @@
+{
+  "node_id": "v18_hb1_sqrt",
+  "summary": {
+    "status": "OK",
+    "total_nan_count": 0,
+    "total_inf_count": 0,
+    "drift_count": 0,
+    "fail_count": 0,
+    "returncode": 0
+  },
+  "observations": [
+    {
+      "step": 1,
+      "verdict": "PASS",
+      "reason": "within thresholds",
+      "path": "/home/scratch.huanhuanc_gpu/hydro-bench/Aker/tasks/hydro_f2_207k_fp64/nodes/.v18_hb1_sqrt.tmp/native_alignment/F2_207K_fp64_step1.json"
+    },
+    {
+      "step": 10,
+      "verdict": "PASS",
+      "reason": "within thresholds",
+      "path": "/home/scratch.huanhuanc_gpu/hydro-bench/Aker/tasks/hydro_f2_207k_fp64/nodes/.v18_hb1_sqrt.tmp/native_alignment/F2_207K_fp64_step10.json"
+    },
+    {
+      "step": 100,
+      "verdict": "PASS",
+      "reason": "within thresholds",
+      "path": "/home/scratch.huanhuanc_gpu/hydro-bench/Aker/tasks/hydro_f2_207k_fp64/nodes/.v18_hb1_sqrt.tmp/native_alignment/F2_207K_fp64_step100.json"
+    },
+    {
+      "step": 7199,
+      "verdict": "PASS",
+      "reason": "within thresholds",
+      "path": "/home/scratch.huanhuanc_gpu/hydro-bench/Aker/tasks/hydro_f2_207k_fp64/nodes/.v18_hb1_sqrt.tmp/native_alignment/F2_207K_fp64_step7199.json"
+    },
+    {
+      "step": 899,
+      "verdict": "PASS",
+      "reason": "within thresholds",
+      "path": "/home/scratch.huanhuanc_gpu/hydro-bench/Aker/tasks/hydro_f2_207k_fp64/nodes/.v18_hb1_sqrt.tmp/native_alignment/F2_207K_fp64_step899.json"
+    }
+  ],
+  "stdout_tail": "case:      F2_207K_fp64\nsteps:     1,10,100,899,7199\nbaseline:  /home/scratch.huanhuanc_gpu/hydro-bench/cuda_native_impl/baselines/native_cuda_v0/fp64/hydro_native_benchmark\ncandidate: /home/scratch.huanhuanc_gpu/hydro-bench/Aker/tasks/hydro_f2_207k_fp64/nodes/.v18_hb1_sqrt.tmp/build/hydro_native_benchmark\nout-dir:   /home/scratch.huanhuanc_gpu/hydro-bench/Aker/tasks/hydro_f2_207k_fp64/nodes/.v18_hb1_sqrt.tmp/native_alignment\n\n[step=1] running baseline/candidate dumps ...\n  -> PASS: within thresholds (H.max=0.0, F0.max=0.0)\n\n[step=10] running baseline/candidate dumps ...\n  -> PASS: within thresholds (H.max=0.0, F0.max=0.0)\n\n[step=100] running baseline/candidate dumps ...\n  -> PASS: within thresholds (H.max=0.0, F0.max=0.0)\n\n[step=899] running baseline/candidate dumps ...\n  -> PASS: within thresholds (H.max=0.0, F0.max=0.0)\n\n[step=7199] running baseline/candidate dumps ...\n  -> PASS: within thresholds (H.max=0.0, F0.max=0.0)\n",
+  "stderr_tail": ""
+}
