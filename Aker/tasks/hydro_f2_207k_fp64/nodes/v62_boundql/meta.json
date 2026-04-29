@@ -1,0 +1,15 @@
+{
+  "node_id": "v62_boundql",
+  "parents": [
+    "v42_rowoff"
+  ],
+  "action": "mutate",
+  "direction": "cache BOUNDA incoming normal velocity before boundary dispatch",
+  "techniques": [
+    "load_reuse",
+    "register_caching",
+    "boundary_helper_cleanup"
+  ],
+  "rationale": "BOUNDA repeatedly reads QL[1] while checking the supercritical boundary path and forming the pre-dispatch FLUX2 value before any helper can modify QL. Loading QL[1] once into ql_normal removes repeated local array reads in that hot boundary dispatch code while preserving the same comparisons and flux expression operand order.",
+  "attempt_status": "OK"
+}
