@@ -1,0 +1,15 @@
+{
+  "node_id": "v94_k6f0",
+  "parents": [
+    "v42_rowoff"
+  ],
+  "action": "mutate",
+  "direction": "reuse freshly computed KLAS6 FLR0 locally",
+  "techniques": [
+    "store_forwarding_avoidance",
+    "register_caching",
+    "boundary_helper_cleanup"
+  ],
+  "rationale": "CalculataKlas6 stores FLR(0) and then immediately reads the same macro-backed sides.FLUX0[idx] value to form dependent FLR(1) and FLR(2) terms in several weir branches. Keeping each freshly computed flux0 in a local register removes those redundant read-backs while preserving the same flux expressions and operand order.",
+  "attempt_status": "OK"
+}
