@@ -1,0 +1,15 @@
+{
+  "node_id": "v48_tsidx_row",
+  "parents": [
+    "v42_rowoff"
+  ],
+  "action": "mutate",
+  "direction": "cache boundary time-series index on the row-offset branch",
+  "techniques": [
+    "integer_cse",
+    "index_reuse",
+    "boundary_helper_cleanup"
+  ],
+  "rationale": "v42_rowoff still computes jt * mesh.CELL + pos twice in CalculateKlas10 for QT/DQT and twice in CalculateKlas1 for ZT/DZT. Caching that integer time-series index once per helper removes duplicate address arithmetic while preserving the same array elements and all floating-point expressions.",
+  "attempt_status": "OK"
+}
