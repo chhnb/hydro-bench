@@ -1,0 +1,632 @@
+{
+  "case": "F2_207K_fp64",
+  "step": 100,
+  "precision": "fp64",
+  "baseline": {
+    "binary": "/home/scratch.huanhuanc_gpu/hydro-bench/cuda_native_impl/baselines/native_cuda_v0/fp64/hydro_native_benchmark",
+    "cwd": "/home/scratch.huanhuanc_gpu/hydro-bench/cuda_native_impl/F2_207K_native_data/run",
+    "dump": "/home/scratch.huanhuanc_gpu/hydro-bench/Aker/tasks/hydro_f2_207k_fp64/nodes/.v33_ratio_trig.tmp/native_alignment/dumps/baseline_F2_207K_fp64_step100_93599.bin",
+    "returncode": 0,
+    "stdout_tail": "../BOUNDE/NZ/NZ0001.DAT\n------------------------ NQ=58, NDAYS=50 ---------------------------\n../BOUNDE/NQ/NQ0001.DAT\n../BOUNDE/NQ/NQ0002.DAT\n------------------------ NNZQ0=0, NZQ=0 ---------------------------\n=== F2 Hydro-Cal Native Benchmark (original kernel code) ===\nCELL=207234, steps=100, steps_per_day=7200, repeat=1\nGPU: NVIDIA A100 80GB PCIe, SMs=108\n\nRunning 100 steps and dumping to /home/scratch.huanhuanc_gpu/hydro-bench/Aker/tasks/hydro_f2_207k_fp64/nodes/.v33_ratio_trig.tmp/native_alignment/dumps/baseline_F2_207K_fp64_step100_93599.bin (with_output=0, ntoutput=50)...\nDumped 207234 cells.\nH range: [0.001000, 28.495618]\n",
+    "stderr_tail": ""
+  },
+  "candidate": {
+    "binary": "/home/scratch.huanhuanc_gpu/hydro-bench/Aker/tasks/hydro_f2_207k_fp64/nodes/.v33_ratio_trig.tmp/build/hydro_native_benchmark",
+    "cwd": "/home/scratch.huanhuanc_gpu/hydro-bench/cuda_native_impl/F2_207K_native_data/run",
+    "dump": "/home/scratch.huanhuanc_gpu/hydro-bench/Aker/tasks/hydro_f2_207k_fp64/nodes/.v33_ratio_trig.tmp/native_alignment/dumps/candidate_F2_207K_fp64_step100_93599.bin",
+    "returncode": 0,
+    "stdout_tail": "../BOUNDE/NZ/NZ0001.DAT\n------------------------ NQ=58, NDAYS=50 ---------------------------\n../BOUNDE/NQ/NQ0001.DAT\n../BOUNDE/NQ/NQ0002.DAT\n------------------------ NNZQ0=0, NZQ=0 ---------------------------\n=== F2 Hydro-Cal Native Benchmark (original kernel code) ===\nCELL=207234, steps=100, steps_per_day=7200, repeat=1\nGPU: NVIDIA A100 80GB PCIe, SMs=108\n\nRunning 100 steps and dumping to /home/scratch.huanhuanc_gpu/hydro-bench/Aker/tasks/hydro_f2_207k_fp64/nodes/.v33_ratio_trig.tmp/native_alignment/dumps/candidate_F2_207K_fp64_step100_93599.bin (with_output=0, ntoutput=50)...\nDumped 207234 cells.\nH range: [0.001000, 28.495618]\n",
+    "stderr_tail": ""
+  },
+  "fields": {
+    "H": {
+      "n_baseline": 207234,
+      "n_candidate": 207234,
+      "n_compared": 207234,
+      "n_finite_pairs": 207234,
+      "baseline_nan_count": 0,
+      "candidate_nan_count": 0,
+      "baseline_inf_count": 0,
+      "candidate_inf_count": 0,
+      "shape_match": true,
+      "all_nonfinite": false,
+      "max_abs": 0.0,
+      "mean_abs": 0.0,
+      "bit_exact_frac": 1.0,
+      "percentiles": {
+        "p50": 0.0,
+        "p90": 0.0,
+        "p99": 0.0,
+        "p999": 0.0
+      },
+      "threshold_counts": {
+        "diff_gt_0e+00": 0,
+        "diff_gt_1e-13": 0,
+        "diff_gt_1e-11": 0,
+        "diff_gt_1e-09": 0,
+        "diff_gt_1e-07": 0,
+        "diff_gt_1e-05": 0,
+        "diff_gt_1e-03": 0,
+        "diff_gt_1e-01": 0
+      },
+      "worst": [
+        {
+          "idx": 207233,
+          "baseline": 10.851077073300168,
+          "candidate": 10.851077073300168,
+          "abs_diff": 0.0
+        },
+        {
+          "idx": 69074,
+          "baseline": 5.911875987484631,
+          "candidate": 5.911875987484631,
+          "abs_diff": 0.0
+        },
+        {
+          "idx": 69084,
+          "baseline": 0.001,
+          "candidate": 0.001,
+          "abs_diff": 0.0
+        },
+        {
+          "idx": 69083,
+          "baseline": 0.001,
+          "candidate": 0.001,
+          "abs_diff": 0.0
+        },
+        {
+          "idx": 69082,
+          "baseline": 0.001,
+          "candidate": 0.001,
+          "abs_diff": 0.0
+        }
+      ]
+    },
+    "U": {
+      "n_baseline": 207234,
+      "n_candidate": 207234,
+      "n_compared": 207234,
+      "n_finite_pairs": 207234,
+      "baseline_nan_count": 0,
+      "candidate_nan_count": 0,
+      "baseline_inf_count": 0,
+      "candidate_inf_count": 0,
+      "shape_match": true,
+      "all_nonfinite": false,
+      "max_abs": 0.0,
+      "mean_abs": 0.0,
+      "bit_exact_frac": 1.0,
+      "percentiles": {
+        "p50": 0.0,
+        "p90": 0.0,
+        "p99": 0.0,
+        "p999": 0.0
+      },
+      "threshold_counts": {
+        "diff_gt_0e+00": 0,
+        "diff_gt_1e-13": 0,
+        "diff_gt_1e-11": 0,
+        "diff_gt_1e-09": 0,
+        "diff_gt_1e-07": 0,
+        "diff_gt_1e-05": 0,
+        "diff_gt_1e-03": 0,
+        "diff_gt_1e-01": 0
+      },
+      "worst": [
+        {
+          "idx": 207233,
+          "baseline": 2.805699662031817e-06,
+          "candidate": 2.805699662031817e-06,
+          "abs_diff": 0.0
+        },
+        {
+          "idx": 69074,
+          "baseline": -3.6945621411101204e-07,
+          "candidate": -3.6945621411101204e-07,
+          "abs_diff": 0.0
+        },
+        {
+          "idx": 69084,
+          "baseline": 0.0,
+          "candidate": 0.0,
+          "abs_diff": 0.0
+        },
+        {
+          "idx": 69083,
+          "baseline": 0.0,
+          "candidate": 0.0,
+          "abs_diff": 0.0
+        },
+        {
+          "idx": 69082,
+          "baseline": 0.0,
+          "candidate": 0.0,
+          "abs_diff": 0.0
+        }
+      ]
+    },
+    "V": {
+      "n_baseline": 207234,
+      "n_candidate": 207234,
+      "n_compared": 207234,
+      "n_finite_pairs": 207234,
+      "baseline_nan_count": 0,
+      "candidate_nan_count": 0,
+      "baseline_inf_count": 0,
+      "candidate_inf_count": 0,
+      "shape_match": true,
+      "all_nonfinite": false,
+      "max_abs": 0.0,
+      "mean_abs": 0.0,
+      "bit_exact_frac": 1.0,
+      "percentiles": {
+        "p50": 0.0,
+        "p90": 0.0,
+        "p99": 0.0,
+        "p999": 0.0
+      },
+      "threshold_counts": {
+        "diff_gt_0e+00": 0,
+        "diff_gt_1e-13": 0,
+        "diff_gt_1e-11": 0,
+        "diff_gt_1e-09": 0,
+        "diff_gt_1e-07": 0,
+        "diff_gt_1e-05": 0,
+        "diff_gt_1e-03": 0,
+        "diff_gt_1e-01": 0
+      },
+      "worst": [
+        {
+          "idx": 207233,
+          "baseline": 1.579983976072935e-06,
+          "candidate": 1.579983976072935e-06,
+          "abs_diff": 0.0
+        },
+        {
+          "idx": 69074,
+          "baseline": 9.077957243305172e-07,
+          "candidate": 9.077957243305172e-07,
+          "abs_diff": 0.0
+        },
+        {
+          "idx": 69084,
+          "baseline": 0.0,
+          "candidate": 0.0,
+          "abs_diff": 0.0
+        },
+        {
+          "idx": 69083,
+          "baseline": 0.0,
+          "candidate": 0.0,
+          "abs_diff": 0.0
+        },
+        {
+          "idx": 69082,
+          "baseline": 0.0,
+          "candidate": 0.0,
+          "abs_diff": 0.0
+        }
+      ]
+    },
+    "Z": {
+      "n_baseline": 207234,
+      "n_candidate": 207234,
+      "n_compared": 207234,
+      "n_finite_pairs": 207234,
+      "baseline_nan_count": 0,
+      "candidate_nan_count": 0,
+      "baseline_inf_count": 0,
+      "candidate_inf_count": 0,
+      "shape_match": true,
+      "all_nonfinite": false,
+      "max_abs": 0.0,
+      "mean_abs": 0.0,
+      "bit_exact_frac": 1.0,
+      "percentiles": {
+        "p50": 0.0,
+        "p90": 0.0,
+        "p99": 0.0,
+        "p999": 0.0
+      },
+      "threshold_counts": {
+        "diff_gt_0e+00": 0,
+        "diff_gt_1e-13": 0,
+        "diff_gt_1e-11": 0,
+        "diff_gt_1e-09": 0,
+        "diff_gt_1e-07": 0,
+        "diff_gt_1e-05": 0,
+        "diff_gt_1e-03": 0,
+        "diff_gt_1e-01": 0
+      },
+      "worst": [
+        {
+          "idx": 207233,
+          "baseline": 2925.2399930733,
+          "candidate": 2925.2399930733,
+          "abs_diff": 0.0
+        },
+        {
+          "idx": 69074,
+          "baseline": 2925.2400009874846,
+          "candidate": 2925.2400009874846,
+          "abs_diff": 0.0
+        },
+        {
+          "idx": 69084,
+          "baseline": 2929.5720450000003,
+          "candidate": 2929.5720450000003,
+          "abs_diff": 0.0
+        },
+        {
+          "idx": 69083,
+          "baseline": 2929.800072,
+          "candidate": 2929.800072,
+          "abs_diff": 0.0
+        },
+        {
+          "idx": 69082,
+          "baseline": 2930.6113520000004,
+          "candidate": 2930.6113520000004,
+          "abs_diff": 0.0
+        }
+      ]
+    },
+    "W": {
+      "n_baseline": 207234,
+      "n_candidate": 207234,
+      "n_compared": 207234,
+      "n_finite_pairs": 207234,
+      "baseline_nan_count": 0,
+      "candidate_nan_count": 0,
+      "baseline_inf_count": 0,
+      "candidate_inf_count": 0,
+      "shape_match": true,
+      "all_nonfinite": false,
+      "max_abs": 0.0,
+      "mean_abs": 0.0,
+      "bit_exact_frac": 1.0,
+      "percentiles": {
+        "p50": 0.0,
+        "p90": 0.0,
+        "p99": 0.0,
+        "p999": 0.0
+      },
+      "threshold_counts": {
+        "diff_gt_0e+00": 0,
+        "diff_gt_1e-13": 0,
+        "diff_gt_1e-11": 0,
+        "diff_gt_1e-09": 0,
+        "diff_gt_1e-07": 0,
+        "diff_gt_1e-05": 0,
+        "diff_gt_1e-03": 0,
+        "diff_gt_1e-01": 0
+      },
+      "worst": [
+        {
+          "idx": 207233,
+          "baseline": 3.219984465517294e-06,
+          "candidate": 3.219984465517294e-06,
+          "abs_diff": 0.0
+        },
+        {
+          "idx": 69074,
+          "baseline": 9.80097429472198e-07,
+          "candidate": 9.80097429472198e-07,
+          "abs_diff": 0.0
+        },
+        {
+          "idx": 69084,
+          "baseline": 0.0,
+          "candidate": 0.0,
+          "abs_diff": 0.0
+        },
+        {
+          "idx": 69083,
+          "baseline": 0.0,
+          "candidate": 0.0,
+          "abs_diff": 0.0
+        },
+        {
+          "idx": 69082,
+          "baseline": 0.0,
+          "candidate": 0.0,
+          "abs_diff": 0.0
+        }
+      ]
+    },
+    "F0": {
+      "n_baseline": 828936,
+      "n_candidate": 828936,
+      "n_compared": 828936,
+      "n_finite_pairs": 828936,
+      "baseline_nan_count": 0,
+      "candidate_nan_count": 0,
+      "baseline_inf_count": 0,
+      "candidate_inf_count": 0,
+      "shape_match": true,
+      "all_nonfinite": false,
+      "max_abs": 0.0,
+      "mean_abs": 0.0,
+      "bit_exact_frac": 1.0,
+      "percentiles": {
+        "p50": 0.0,
+        "p90": 0.0,
+        "p99": 0.0,
+        "p999": 0.0
+      },
+      "threshold_counts": {
+        "diff_gt_0e+00": 0,
+        "diff_gt_1e-13": 0,
+        "diff_gt_1e-11": 0,
+        "diff_gt_1e-09": 0,
+        "diff_gt_1e-07": 0,
+        "diff_gt_1e-05": 0,
+        "diff_gt_1e-03": 0,
+        "diff_gt_1e-01": 0
+      },
+      "worst": [
+        {
+          "idx": 828935,
+          "baseline": -2.0432828245165523e-05,
+          "candidate": -2.0432828245165523e-05,
+          "abs_diff": 0.0,
+          "cell": 207233,
+          "edge_j": 3
+        },
+        {
+          "idx": 276308,
+          "baseline": 1.8188938120086417e-08,
+          "candidate": 1.8188938120086417e-08,
+          "abs_diff": 0.0,
+          "cell": 69077,
+          "edge_j": 0
+        },
+        {
+          "idx": 276318,
+          "baseline": -5.0569904792311824e-08,
+          "candidate": -5.0569904792311824e-08,
+          "abs_diff": 0.0,
+          "cell": 69079,
+          "edge_j": 2
+        },
+        {
+          "idx": 276317,
+          "baseline": 4.064506896755231e-08,
+          "candidate": 4.064506896755231e-08,
+          "abs_diff": 0.0,
+          "cell": 69079,
+          "edge_j": 1
+        },
+        {
+          "idx": 276316,
+          "baseline": 2.7783872320134373e-08,
+          "candidate": 2.7783872320134373e-08,
+          "abs_diff": 0.0,
+          "cell": 69079,
+          "edge_j": 0
+        }
+      ]
+    },
+    "F1": {
+      "n_baseline": 828936,
+      "n_candidate": 828936,
+      "n_compared": 828936,
+      "n_finite_pairs": 828936,
+      "baseline_nan_count": 0,
+      "candidate_nan_count": 0,
+      "baseline_inf_count": 0,
+      "candidate_inf_count": 0,
+      "shape_match": true,
+      "all_nonfinite": false,
+      "max_abs": 0.0,
+      "mean_abs": 0.0,
+      "bit_exact_frac": 1.0,
+      "percentiles": {
+        "p50": 0.0,
+        "p90": 0.0,
+        "p99": 0.0,
+        "p999": 0.0
+      },
+      "threshold_counts": {
+        "diff_gt_0e+00": 0,
+        "diff_gt_1e-13": 0,
+        "diff_gt_1e-11": 0,
+        "diff_gt_1e-09": 0,
+        "diff_gt_1e-07": 0,
+        "diff_gt_1e-05": 0,
+        "diff_gt_1e-03": 0,
+        "diff_gt_1e-01": 0
+      },
+      "worst": [
+        {
+          "idx": 828935,
+          "baseline": 3.831255080802282e-11,
+          "candidate": 3.831255080802282e-11,
+          "abs_diff": 0.0,
+          "cell": 207233,
+          "edge_j": 3
+        },
+        {
+          "idx": 276308,
+          "baseline": -5.388615777018476e-16,
+          "candidate": -5.388615777018476e-16,
+          "abs_diff": 0.0,
+          "cell": 69077,
+          "edge_j": 0
+        },
+        {
+          "idx": 276318,
+          "baseline": 5.985674085246656e-16,
+          "candidate": 5.985674085246656e-16,
+          "abs_diff": 0.0,
+          "cell": 69079,
+          "edge_j": 2
+        },
+        {
+          "idx": 276317,
+          "baseline": 3.889174980955866e-16,
+          "candidate": 3.889174980955866e-16,
+          "abs_diff": 0.0,
+          "cell": 69079,
+          "edge_j": 1
+        },
+        {
+          "idx": 276316,
+          "baseline": 2.037425386686217e-16,
+          "candidate": 2.037425386686217e-16,
+          "abs_diff": 0.0,
+          "cell": 69079,
+          "edge_j": 0
+        }
+      ]
+    },
+    "F2": {
+      "n_baseline": 828936,
+      "n_candidate": 828936,
+      "n_compared": 828936,
+      "n_finite_pairs": 828936,
+      "baseline_nan_count": 0,
+      "candidate_nan_count": 0,
+      "baseline_inf_count": 0,
+      "candidate_inf_count": 0,
+      "shape_match": true,
+      "all_nonfinite": false,
+      "max_abs": 0.0,
+      "mean_abs": 0.0,
+      "bit_exact_frac": 1.0,
+      "percentiles": {
+        "p50": 0.0,
+        "p90": 0.0,
+        "p99": 0.0,
+        "p999": 0.0
+      },
+      "threshold_counts": {
+        "diff_gt_0e+00": 0,
+        "diff_gt_1e-13": 0,
+        "diff_gt_1e-11": 0,
+        "diff_gt_1e-09": 0,
+        "diff_gt_1e-07": 0,
+        "diff_gt_1e-05": 0,
+        "diff_gt_1e-03": 0,
+        "diff_gt_1e-01": 0
+      },
+      "worst": [
+        {
+          "idx": 828935,
+          "baseline": 4.69035179330305e-11,
+          "candidate": 4.69035179330305e-11,
+          "abs_diff": 0.0,
+          "cell": 207233,
+          "edge_j": 3
+        },
+        {
+          "idx": 276308,
+          "baseline": 1.968914777202605e-14,
+          "candidate": 1.968914777202605e-14,
+          "abs_diff": 0.0,
+          "cell": 69077,
+          "edge_j": 0
+        },
+        {
+          "idx": 276318,
+          "baseline": 9.790627839421926e-16,
+          "candidate": 9.790627839421926e-16,
+          "abs_diff": 0.0,
+          "cell": 69079,
+          "edge_j": 2
+        },
+        {
+          "idx": 276317,
+          "baseline": -3.03510303863217e-16,
+          "candidate": -3.03510303863217e-16,
+          "abs_diff": 0.0,
+          "cell": 69079,
+          "edge_j": 1
+        },
+        {
+          "idx": 276316,
+          "baseline": 2.7750920396592907e-16,
+          "candidate": 2.7750920396592907e-16,
+          "abs_diff": 0.0,
+          "cell": 69079,
+          "edge_j": 0
+        }
+      ]
+    },
+    "F3": {
+      "n_baseline": 828936,
+      "n_candidate": 828936,
+      "n_compared": 828936,
+      "n_finite_pairs": 828936,
+      "baseline_nan_count": 0,
+      "candidate_nan_count": 0,
+      "baseline_inf_count": 0,
+      "candidate_inf_count": 0,
+      "shape_match": true,
+      "all_nonfinite": false,
+      "max_abs": 0.0,
+      "mean_abs": 0.0,
+      "bit_exact_frac": 1.0,
+      "percentiles": {
+        "p50": 0.0,
+        "p90": 0.0,
+        "p99": 0.0,
+        "p999": 0.0
+      },
+      "threshold_counts": {
+        "diff_gt_0e+00": 0,
+        "diff_gt_1e-13": 0,
+        "diff_gt_1e-11": 0,
+        "diff_gt_1e-09": 0,
+        "diff_gt_1e-07": 0,
+        "diff_gt_1e-05": 0,
+        "diff_gt_1e-03": 0,
+        "diff_gt_1e-01": 0
+      },
+      "worst": [
+        {
+          "idx": 828935,
+          "baseline": 577.5435212932317,
+          "candidate": 577.5435212932317,
+          "abs_diff": 0.0,
+          "cell": 207233,
+          "edge_j": 3
+        },
+        {
+          "idx": 276308,
+          "baseline": 182.44853241650404,
+          "candidate": 182.44853241650404,
+          "abs_diff": 0.0,
+          "cell": 69077,
+          "edge_j": 0
+        },
+        {
+          "idx": 276318,
+          "baseline": 89.48474358821194,
+          "candidate": 89.48474358821194,
+          "abs_diff": 0.0,
+          "cell": 69079,
+          "edge_j": 2
+        },
+        {
+          "idx": 276317,
+          "baseline": 89.48474336338619,
+          "candidate": 89.48474336338619,
+          "abs_diff": 0.0,
+          "cell": 69079,
+          "edge_j": 1
+        },
+        {
+          "idx": 276316,
+          "baseline": 89.48474335068728,
+          "candidate": 89.48474335068728,
+          "abs_diff": 0.0,
+          "cell": 69079,
+          "edge_j": 0
+        }
+      ]
+    }
+  },
+  "verdict": "PASS",
+  "reason": "within thresholds"
+}

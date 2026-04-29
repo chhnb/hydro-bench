@@ -1,0 +1,15 @@
+{
+  "node_id": "v33_ratio_trig",
+  "parents": [
+    "v27_ratio_reg"
+  ],
+  "action": "mutate",
+  "direction": "pass cached side-normal trig values into KLAS3 and KLAS6 on the ratio-reg branch",
+  "techniques": [
+    "load_reuse",
+    "helper_argument_reuse",
+    "register_caching"
+  ],
+  "rationale": "CalculateFluxKernel already loads sides.COSF[idx] and sides.SINF[idx] into COSJ and SINJ for every side, but the KLAS3 and KLAS6 boundary helpers reload the same immutable side-normal values. Passing the cached registers through BOUNDA removes redundant geometry loads while preserving all flux arithmetic operands and order.",
+  "attempt_status": "OK"
+}
