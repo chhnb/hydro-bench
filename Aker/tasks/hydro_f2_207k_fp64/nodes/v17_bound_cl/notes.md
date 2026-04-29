@@ -23,3 +23,6 @@ Host-side broker validation is pending. meta.json intentionally sets attempt_sta
 ## Host validation
 - test_acc: status=OK rc=0 queue_wait_ms=0 run_ms=40891
 - test_perf: status=OK rc=0 queue_wait_ms=1 run_ms=24235
+
+## Host validation
+- host validation: existing OK reports reused

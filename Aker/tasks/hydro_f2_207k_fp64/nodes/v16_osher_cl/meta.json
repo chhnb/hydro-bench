@@ -1,0 +1,15 @@
+{
+  "node_id": "v16_osher_cl",
+  "parents": [
+    "v15_klas_arg"
+  ],
+  "action": "mutate",
+  "direction": "reuse caller-computed wave speed in OSHER instead of recomputing sqrt",
+  "techniques": [
+    "sqrt_reuse",
+    "register_caching",
+    "helper_argument_reuse"
+  ],
+  "rationale": "CalculateFluxKernel already computes CL and CL1 as sqrt(9.81 * H) to form FIL before each OSHER call, but OSHER recomputes the same wave speed from its depth argument for branch classification. Passing the already computed wave speed removes a redundant sqrt per OSHER call while preserving the same comparison value and operand order elsewhere.",
+  "attempt_status": "OK"
+}
