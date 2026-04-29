@@ -1,0 +1,15 @@
+{
+  "node_id": "v46_osher_qreg",
+  "parents": [
+    "v42_rowoff"
+  ],
+  "action": "mutate",
+  "direction": "cache OSHER normal-state scalars on the row-offset branch",
+  "techniques": [
+    "load_reuse",
+    "register_caching",
+    "osher_classification"
+  ],
+  "rationale": "OSHER reads QR[1] once to form FIR and then repeatedly reads QL[1] and QR[1] while classifying K1. Caching those normal-state scalars in local registers removes repeated local array loads on internal-edge OSHER calls while preserving the same comparison operands and flux arithmetic.",
+  "attempt_status": "OK"
+}
